@@ -169,9 +169,9 @@ class BigQueryDataImporter:
             info = match_data['info']
             collection_info = match_data.get('collection_info', {})
             
-            # convert game_datetime from milliseconds to datetime 
-            game_datetime = datetime.fromtimestamp(info['game_datetime'] / 1000)
-            game_creation = datetime.fromtimestamp(info.get('gameCreation', info['game_datetime']) / 1000)
+            # convert game_datetime from milliseconds to ISO format string for BigQuery
+            game_datetime = datetime.fromtimestamp(info['game_datetime'] / 1000).isoformat()
+            game_creation = datetime.fromtimestamp(info.get('gameCreation', info['game_datetime']) / 1000).isoformat()
             
             # Prepare participant rows (one row per participant)
             participant_rows = []
@@ -254,7 +254,7 @@ class BigQueryDataImporter:
                     # Collection metadata
                     'collection_start_timestamp': collection_info.get('start_timestamp', None),
                     'collection_timestamp': collection_info.get('collection_timestamp', None),
-                    'collection_datetime': datetime.now()
+                    'collection_datetime': datetime.now().isoformat()
                 }
 
                 participant_rows.append(participant_row)
