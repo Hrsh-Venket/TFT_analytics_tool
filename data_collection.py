@@ -42,7 +42,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try: 
     from google.cloud import bigquery
-    from bigquery_opertions import BigQueryDataImporter
+    from bigquery_operations import BigQueryDataImporter
     from google.cloud.exceptions import NotFound, Forbidden
     import pandas as pd
     BIGQUERY_AVAILABLE = True
