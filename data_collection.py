@@ -9,14 +9,14 @@ Includes rate limiting, player lookup, match history, and bulk data collection.
 # CONFIGURATION - EDIT THESE VALUES
 # ===============================
 
-API_KEY = "RGAPI-c5a7e012-13e0-40b2-9f5b-480679108e45"  # Replace with your actual Riot API key
-days = 43
+API_KEY = "RGAPI-90d45e80-03c4-46d5-bf9d-0abc587688c0"  # Replace with your actual Riot API key
+days = 44
 START_TIMESTAMP = (130032000 + (days * 86400))  # Epoch timestamp for period-based collection
 # 0 is June 16th, 2021, counts seconds from them 
 # 130002000 is July 30th 2025
 
 INIT_TRACKER_ONLY = False      # Set to True to only initialize tracker
-TEST_MODE = True               # Set to True to test with structure.json instead of API calls
+TEST_MODE = False               # Set to True to test with structure.json instead of API calls
 
 # Collection settings
 TIER = 'CHALLENGER'            # Minimum tier for data collection
