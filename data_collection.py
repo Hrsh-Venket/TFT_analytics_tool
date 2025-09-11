@@ -16,6 +16,7 @@ START_TIMESTAMP = (130032000 + (days * 86400))  # Epoch timestamp for period-bas
 # 130002000 is July 30th 2025
 
 INIT_TRACKER_ONLY = False      # Set to True to only initialize tracker
+TEST_MODE = True               # Set to True to test with structure.json instead of API calls
 
 # Collection settings
 TIER = 'CHALLENGER'            # Minimum tier for data collection
@@ -558,6 +559,98 @@ class SetBasedCollectionProgress:
               f"ETA: {eta_minutes:.0f}min")
 
 
+def load_test_data():
+    """Load test match data from structure.json for testing BigQuery integration"""
+    try:
+        with open('structure.json', 'r') as f:
+            test_match = json.load(f)
+        
+        # Add collection info for BigQuery
+        test_match['collection_info'] = {
+            'start_timestamp': int(datetime.now().timestamp()),
+            'collection_timestamp': int(datetime.now().timestamp())
+        }
+        
+        print(f"✓ Loaded test match: {test_match['metadata']['match_id']}")
+        return [test_match]  # Return as list for batch processing
+    except FileNotFoundError:
+        print("✗ structure.json not found - cannot run test mode")
+        return []
+    except Exception as e:
+        print(f"✗ Error loading test data: {e}")
+        return []
+
+def test_bigquery_integration():
+    """Test BigQuery integration using structure.json data"""
+    print("=" * 60)
+    print("TESTING BIGQUERY INTEGRATION")
+    print("=" * 60)
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Initialize BigQuery importer
+    bigquery_importer = None
+    if BIGQUERY_AVAILABLE:
+        try:
+            bigquery_importer = BigQueryDataImporter()
+            print("✓ BigQuery connection established")
+            print(f"  Project: {bigquery_importer.project_id}")
+            print(f"  Dataset: {bigquery_importer.dataset_id}")
+        except Exception as e:
+            print(f"✗ BigQuery unavailable: {e}")
+            print("  Will test JSONL fallback only")
+    
+    # Create tables if BigQuery is available
+    if bigquery_importer:
+        print("\n1. Creating BigQuery tables...")
+        success, message = bigquery_importer.create_tables()
+        if success:
+            print(f"✓ Tables ready: {message}")
+        else:
+            print(f"⚠ Table creation issue: {message}")
+    
+    # Load test data
+    print("\n2. Loading test data...")
+    test_matches = load_test_data()
+    if not test_matches:
+        print("✗ Cannot proceed without test data")
+        return
+    
+    # Test data storage
+    print("\n3. Testing data storage...")
+    inserted, duplicates, errors = store_matches_data(
+        test_matches, None, "test_output.jsonl", bigquery_importer
+    )
+    
+    print(f"  Inserted: {inserted}")
+    print(f"  Duplicates: {duplicates}")  
+    print(f"  Errors: {errors}")
+    
+    # Test statistics if BigQuery available
+    if bigquery_importer:
+        print("\n4. Testing statistics queries...")
+        try:
+            count = bigquery_importer.get_match_count()
+            print(f"✓ Total matches in BigQuery: {count}")
+        except Exception as e:
+            print(f"⚠ Statistics query error: {e}")
+    
+    # Test duplicate detection
+    print("\n5. Testing duplicate detection...")
+    if bigquery_importer:
+        match_id = test_matches[0]['metadata']['match_id']
+        exists = bigquery_importer.check_match_exists(match_id)
+        print(f"✓ Match {match_id} exists: {exists}")
+        
+        # Try inserting again (should be duplicate)
+        print("   Attempting duplicate insertion...")
+        inserted2, duplicates2, errors2 = store_matches_data(
+            test_matches, None, None, bigquery_importer
+        )
+        print(f"   Second attempt - Inserted: {inserted2}, Duplicates: {duplicates2}")
+    
+    print(f"\n✓ Test completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+
 def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER', 
                                 region_matches='sea', region_players='sg2',
                                 output_file=None, batch_size=50, max_workers=5,
@@ -886,15 +979,24 @@ if __name__ == "__main__":
     print(f"  API Key: {'*' * (len(API_KEY) - 4) + API_KEY[-4:]}")
     print(f"  Tier: {TIER}")
     print(f"  Regions: {REGION_PLAYERS} (players), {REGION_MATCHES} (matches)")
-    print(f"  Storage: JSONL")
+    print(f"  Storage: {'BigQuery + JSONL' if BIGQUERY_AVAILABLE else 'JSONL only'}")
     print(f"  Output file: {OUTPUT_FILE}")
     print(f"  API batch size: {BATCH_SIZE}, Workers: {MAX_WORKERS}")
-    if INIT_TRACKER_ONLY:
+    
+    if TEST_MODE:
+        print(f"  Mode: TEST MODE - Using structure.json data")
+    elif INIT_TRACKER_ONLY:
         print(f"  Mode: Initialize tracker only")
     else:
         readable_time = datetime.fromtimestamp(START_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')
         print(f"  Mode: Period-based collection from {readable_time}")
     print()
+    
+    # Special mode: Test BigQuery integration
+    if TEST_MODE:
+        print("🧪 TEST MODE: Testing BigQuery integration with structure.json...")
+        test_bigquery_integration()
+        exit(0)
     
     # Special mode: Initialize global tracker
     if INIT_TRACKER_ONLY:
