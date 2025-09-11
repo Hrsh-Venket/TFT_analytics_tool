@@ -42,7 +42,9 @@ class BigQueryDataImporter:
             print(f"Created dataset {self.dataset_id}")
             
             # Create tables after dataset creation
-            self.create_tables()
+            success, message = self.create_tables()
+            if not success:
+                print(f"Warning: {message}")
     
     def create_tables(self):
           """Create BigQuery tables with proper schema for TFT data"""
@@ -130,10 +132,11 @@ class BigQueryDataImporter:
               print(f"  - Partitioned by: DATE(game_datetime)")
               print(f"  - Clustered by: tft_set_number, placement, level")
               print(f"  - Schema: {len(match_participants_schema)} fields with nested STRUCT arrays")
+              return True, f"Successfully created table {table.table_id}"
 
           except Exception as e:
               print(f"✗ Error creating table: {e}")
-              raise
+              return False, f"Error creating table: {e}"
         
     def check_match_exists(self, match_id):
         """Check if match already exists in BigQuery"""
