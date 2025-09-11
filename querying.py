@@ -27,6 +27,14 @@ try:
 except ImportError:
     HAS_DATABASE = False
 
+# BigQuery imports
+try:
+    from google.cloud import bigquery
+    from bigquery_operations import BigQueryDataImporter
+    HAS_BIGQUERY = True
+except ImportError:
+    HAS_BIGQUERY = False
+
 # Legacy file-based imports
 try:
     from clustering import query_jsonl
@@ -1445,6 +1453,603 @@ class TFTQueryDB:
 
 
 # ============================================================================
+# BIGQUERY-BASED QUERYING SYSTEM
+# ============================================================================
+
+class TFTQueryBigQuery:
+    """
+    BigQuery-based TFT composition query builder compatible with the denormalized schema.
+    
+    Works with the single match_participants table that contains all match and participant data
+    with nested STRUCT arrays for units, traits, etc.
+    """
+    
+    def __init__(self, project_id=None, dataset_id='tft_analytics'):
+        """
+        Initialize the BigQuery TFT query builder.
+        
+        Args:
+            project_id: GCP project ID (auto-detected if None)
+            dataset_id: BigQuery dataset ID
+        """
+        if not HAS_BIGQUERY:
+            raise ImportError("BigQuery dependencies not available. Install google-cloud-bigquery.")
+        
+        self.client = bigquery.Client(project=project_id)
+        self.project_id = project_id or self.client.project
+        self.dataset_id = dataset_id
+        self.table_id = f"{self.project_id}.{self.dataset_id}.match_participants"
+        
+        # Query state
+        self._sub_cluster_id = None
+        self._main_cluster_id = None
+        self._filters: List[DatabaseQueryFilter] = []
+    
+    def set_sub_cluster(self, cluster_id: int):
+        """Filter results to specific sub-cluster only."""
+        self._sub_cluster_id = cluster_id
+        return self
+    
+    def set_main_cluster(self, cluster_id: int):
+        """Filter results to specific main cluster only."""
+        self._main_cluster_id = cluster_id
+        return self
+    
+    def set_cluster(self, cluster_id: int):
+        """Legacy compatibility - defaults to sub-cluster."""
+        return self.set_sub_cluster(cluster_id)
+    
+    def add_unit(self, unit_id: str, must_have: bool = True):
+        """Add filter for presence/absence of a specific unit."""
+        if must_have:
+            condition = """
+                EXISTS (
+                    SELECT 1 FROM UNNEST(units) AS unit
+                    WHERE unit.character_id = @unit_id
+                )
+            """
+        else:
+            condition = """
+                NOT EXISTS (
+                    SELECT 1 FROM UNNEST(units) AS unit
+                    WHERE unit.character_id = @unit_id
+                )
+            """
+        
+        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id}))
+        return self
+    
+    def add_unit_count(self, unit_id: str, count: int):
+        """Add filter for exact unit count of a specific unit type."""
+        condition = """
+            (SELECT COUNT(*) 
+             FROM UNNEST(units) AS unit
+             WHERE unit.character_id = @unit_id) = @count
+        """
+        
+        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "count": count}))
+        return self
+    
+    def add_item_on_unit(self, unit_id: str, item_id: str):
+        """Add filter for specific item on specific unit."""
+        condition = """
+            EXISTS (
+                SELECT 1 FROM UNNEST(units) AS unit
+                CROSS JOIN UNNEST(unit.item_names) AS item
+                WHERE unit.character_id = @unit_id
+                AND item = @item_id
+            )
+        """
+        
+        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "item_id": item_id}))
+        return self
+    
+    def add_trait(self, trait_name: str, min_tier: int = 1, max_tier: int = 4):
+        """Add filter for trait activation level."""
+        condition = """
+            EXISTS (
+                SELECT 1 FROM UNNEST(traits) AS trait
+                WHERE trait.name = @trait_name
+                AND trait.tier_current >= @min_tier
+                AND trait.tier_current <= @max_tier
+            )
+        """
+        
+        self._filters.append(DatabaseQueryFilter(condition, {
+            "trait_name": trait_name,
+            "min_tier": min_tier,
+            "max_tier": max_tier
+        }))
+        return self
+    
+    def add_player_level(self, min_level: int = 1, max_level: int = 10):
+        """Add filter for player level range."""
+        condition = "level >= @min_level AND level <= @max_level"
+        self._filters.append(DatabaseQueryFilter(condition, {"min_level": min_level, "max_level": max_level}))
+        return self
+    
+    def add_last_round(self, min_round: int = 1, max_round: int = 50):
+        """Add filter for last round survived range."""
+        condition = "last_round >= @min_round AND last_round <= @max_round"
+        self._filters.append(DatabaseQueryFilter(condition, {"min_round": min_round, "max_round": max_round}))
+        return self
+    
+    def add_unit_star_level(self, unit_id: str, min_star: int = 1, max_star: int = 3):
+        """Add filter for unit star level range."""
+        condition = """
+            EXISTS (
+                SELECT 1 FROM UNNEST(units) AS unit
+                WHERE unit.character_id = @unit_id
+                AND unit.tier >= @min_star
+                AND unit.tier <= @max_star
+            )
+        """
+        
+        self._filters.append(DatabaseQueryFilter(condition, {
+            "unit_id": unit_id,
+            "min_star": min_star,
+            "max_star": max_star
+        }))
+        return self
+    
+    def add_unit_item_count(self, unit_id: str, min_count: int = 0, max_count: int = 3):
+        """Add filter for number of items on a specific unit."""
+        condition = """
+            EXISTS (
+                SELECT 1 FROM UNNEST(units) AS unit
+                WHERE unit.character_id = @unit_id
+                AND ARRAY_LENGTH(unit.item_names) >= @min_count
+                AND ARRAY_LENGTH(unit.item_names) <= @max_count
+            )
+        """
+        
+        self._filters.append(DatabaseQueryFilter(condition, {
+            "unit_id": unit_id,
+            "min_count": min_count,
+            "max_count": max_count
+        }))
+        return self
+    
+    def add_augment(self, augment_id: str):
+        """Add filter for specific augment (note: augments not in current schema, will need to be added)."""
+        # Note: The current schema doesn't include augments, but keeping for API compatibility
+        # This would need to be implemented when augments are added to the BigQuery schema
+        condition = """
+            EXISTS (
+                SELECT 1 FROM UNNEST(SPLIT(COALESCE(augments, ''), ',')) AS augment
+                WHERE TRIM(augment) = @augment_id
+            )
+        """
+        self._filters.append(DatabaseQueryFilter(condition, {"augment_id": augment_id}))
+        return self
+
+    def set_patch(self, patch_version: str):
+        """Add filter for specific patch version."""
+        condition = "game_version LIKE @patch_pattern"
+        self._filters.append(DatabaseQueryFilter(condition, {"patch_pattern": f"Version {patch_version}%"}))
+        return self
+    
+    def add_custom_filter(self, condition: str, params: Optional[Dict[str, Any]] = None):
+        """
+        Add a custom BigQuery SQL filter condition.
+        
+        Args:
+            condition: SQL WHERE condition with parameter placeholders (@param_name)
+            params: Parameters for the condition
+        """
+        self._filters.append(DatabaseQueryFilter(condition, params or {}))
+        return self
+    
+    def or_(self, *other_queries):
+        """
+        Combine this query with other queries using OR logic.
+        Returns a new TFTQueryBigQuery instance with combined filters.
+        """
+        if not other_queries:
+            return self
+        
+        # Create new query instance
+        new_query = TFTQueryBigQuery(project_id=self.project_id, dataset_id=self.dataset_id)
+        new_query._sub_cluster_id = self._sub_cluster_id
+        new_query._main_cluster_id = self._main_cluster_id
+        
+        # Combine all filters using OR logic
+        if self._filters or any(q._filters for q in other_queries):
+            all_conditions = []
+            all_params = {}
+            
+            # Add current query conditions
+            if self._filters:
+                current_condition_parts = []
+                for f in self._filters:
+                    current_condition_parts.append(f.condition)
+                    all_params.update(f.params)
+                if current_condition_parts:
+                    all_conditions.append(f"({' AND '.join(current_condition_parts)})")
+            
+            # Add other query conditions with parameter renaming to avoid conflicts
+            for i, other_query in enumerate(other_queries):
+                if hasattr(other_query, '_filters') and other_query._filters:
+                    other_condition_parts = []
+                    for j, f in enumerate(other_query._filters):
+                        renamed_condition = f.condition
+                        for key, value in f.params.items():
+                            new_key = f"{key}_or_{i}_{j}"
+                            all_params[new_key] = value
+                            renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                        other_condition_parts.append(renamed_condition)
+                    if other_condition_parts:
+                        all_conditions.append(f"({' AND '.join(other_condition_parts)})")
+            
+            if all_conditions:
+                combined_condition = ' OR '.join(all_conditions)
+                new_query._filters.append(DatabaseQueryFilter(combined_condition, all_params))
+        
+        return new_query
+    
+    def not_(self, other_query=None):
+        """
+        Apply NOT logic to this query or to another query.
+        Returns a new TFTQueryBigQuery instance.
+        
+        Usage: 
+        - TFTQuery().not_(TFTQuery().add_unit('TFT14_Jinx')) = NOT Jinx
+        - TFTQuery().add_trait('TFT14_Vanguard').not_(TFTQuery().add_unit('TFT14_Jinx')) = Vanguard AND NOT Jinx
+        """
+        new_query = TFTQueryBigQuery(project_id=self.project_id, dataset_id=self.dataset_id)
+        new_query._sub_cluster_id = self._sub_cluster_id
+        new_query._main_cluster_id = self._main_cluster_id
+        
+        if other_query is None:
+            # NOT this query
+            if self._filters:
+                current_conditions = []
+                all_params = {}
+                for f in self._filters:
+                    current_conditions.append(f.condition)
+                    all_params.update(f.params)
+                combined_condition = f"NOT ({' AND '.join(current_conditions)})"
+                new_query._filters.append(DatabaseQueryFilter(combined_condition, all_params))
+        else:
+            # This query AND NOT other_query
+            all_params = {}
+            
+            # Add current query conditions
+            current_conditions = []
+            for f in self._filters:
+                current_conditions.append(f.condition)
+                all_params.update(f.params)
+            
+            # Add NOT other_query conditions
+            if hasattr(other_query, '_filters') and other_query._filters:
+                other_conditions = []
+                for f in other_query._filters:
+                    # Rename conflicting parameters
+                    renamed_condition = f.condition
+                    for key, value in f.params.items():
+                        if key in all_params:
+                            new_key = f"{key}_not_{id(f)}"
+                            all_params[new_key] = value
+                            renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                        else:
+                            all_params[key] = value
+                    other_conditions.append(renamed_condition)
+                
+                if current_conditions and other_conditions:
+                    combined_condition = f"({' AND '.join(current_conditions)}) AND NOT ({' AND '.join(other_conditions)})"
+                elif current_conditions:
+                    combined_condition = ' AND '.join(current_conditions)
+                elif other_conditions:
+                    combined_condition = f"NOT ({' AND '.join(other_conditions)})"
+                else:
+                    combined_condition = "TRUE"  # Always true if no conditions
+                
+                new_query._filters.append(DatabaseQueryFilter(combined_condition, all_params))
+        
+        return new_query
+    
+    def xor(self, other_query):
+        """
+        Combine this query with another query using XOR logic.
+        Returns a new TFTQueryBigQuery instance.
+        
+        Usage: TFTQuery().add_unit('TFT14_Jinx').xor(TFTQuery().add_unit('TFT14_Aphelios'))
+        """
+        new_query = TFTQueryBigQuery(project_id=self.project_id, dataset_id=self.dataset_id)
+        new_query._sub_cluster_id = self._sub_cluster_id
+        new_query._main_cluster_id = self._main_cluster_id
+        
+        if hasattr(other_query, '_filters'):
+            all_params = {}
+            
+            # For XOR: (A AND NOT B) OR (NOT A AND B)
+            # Each condition appears twice, so we need unique parameters for each occurrence
+            
+            # First occurrence - get current query conditions (A)
+            current_conditions_a1 = []
+            for i, f in enumerate(self._filters):
+                renamed_condition = f.condition
+                for key, value in f.params.items():
+                    new_key = f"{key}_a1_{i}"
+                    all_params[new_key] = value
+                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                current_conditions_a1.append(renamed_condition)
+            
+            # First occurrence - get other query conditions (B)
+            other_conditions_b1 = []
+            for i, f in enumerate(other_query._filters):
+                renamed_condition = f.condition
+                for key, value in f.params.items():
+                    new_key = f"{key}_b1_{i}"
+                    all_params[new_key] = value
+                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                other_conditions_b1.append(renamed_condition)
+            
+            # Second occurrence - get current query conditions (for NOT A)
+            current_conditions_a2 = []
+            for i, f in enumerate(self._filters):
+                renamed_condition = f.condition
+                for key, value in f.params.items():
+                    new_key = f"{key}_a2_{i}"
+                    all_params[new_key] = value
+                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                current_conditions_a2.append(renamed_condition)
+            
+            # Second occurrence - get other query conditions (B)
+            other_conditions_b2 = []
+            for i, f in enumerate(other_query._filters):
+                renamed_condition = f.condition
+                for key, value in f.params.items():
+                    new_key = f"{key}_b2_{i}"
+                    all_params[new_key] = value
+                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                other_conditions_b2.append(renamed_condition)
+            
+            # XOR: (A AND NOT B) OR (NOT A AND B)
+            if current_conditions_a1 and other_conditions_b1:
+                current_clause_a1 = ' AND '.join(current_conditions_a1)
+                other_clause_b1 = ' AND '.join(other_conditions_b1)
+                current_clause_a2 = ' AND '.join(current_conditions_a2)
+                other_clause_b2 = ' AND '.join(other_conditions_b2)
+                
+                xor_condition = f"(({current_clause_a1}) AND NOT ({other_clause_b1})) OR (NOT ({current_clause_a2}) AND ({other_clause_b2}))"
+                new_query._filters.append(DatabaseQueryFilter(xor_condition, all_params))
+        
+        return new_query
+
+    def add_or_group(self, *conditions):
+        """Add multiple conditions combined with OR logic."""
+        if not conditions:
+            return self
+        
+        # For BigQuery mode, conditions should be filter functions or SQL strings
+        if all(isinstance(cond, str) for cond in conditions):
+            or_condition = " OR ".join(f"({cond})" for cond in conditions)
+            self._filters.append(DatabaseQueryFilter(or_condition))
+        else:
+            # Support for custom callable conditions - would need conversion to SQL
+            # For now, raise an error suggesting to use or_() method instead
+            raise NotImplementedError("Use or_() method for combining multiple query objects")
+        
+        return self
+    
+    def add_xor_group(self, *conditions):
+        """Add multiple conditions combined with XOR logic."""
+        if not conditions:
+            return self
+            
+        # XOR: exactly one condition should be true
+        if len(conditions) == 2 and all(isinstance(cond, str) for cond in conditions):
+            xor_condition = f"(({conditions[0]}) AND NOT ({conditions[1]})) OR (NOT ({conditions[0]}) AND ({conditions[1]}))"
+            self._filters.append(DatabaseQueryFilter(xor_condition))
+        else:
+            # For more complex XOR, would need conversion logic
+            raise NotImplementedError("Complex XOR operations not yet implemented for BigQuery mode")
+        
+        return self
+    
+    def add_not_filter(self, condition):
+        """Add a NOT condition."""
+        if isinstance(condition, str):
+            not_condition = f"NOT ({condition})"
+            self._filters.append(DatabaseQueryFilter(not_condition))
+        else:
+            # For callable conditions, suggest using not_() method
+            raise NotImplementedError("Use not_() method for negating query objects")
+        
+        return self
+    
+    def _build_sql_query(self) -> tuple[str, Dict[str, Any]]:
+        """Build the complete BigQuery SQL query with all filters."""
+        base_query = f"""
+            SELECT 
+                match_id,
+                puuid,
+                riot_id_game_name,
+                riot_id_tagline,
+                placement,
+                level,
+                last_round,
+                players_eliminated,
+                total_damage_to_players,
+                gold_left,
+                units,
+                traits,
+                companion,
+                missions,
+                game_datetime,
+                game_creation,
+                game_version,
+                tft_set_number,
+                tft_set_core_name
+            FROM `{self.table_id}`
+            WHERE 1=1
+        """
+        
+        all_params = {}
+        
+        # Add cluster filters (if we have cluster data in the future)
+        if self._sub_cluster_id is not None:
+            base_query += " AND sub_cluster_id = @sub_cluster_id"
+            all_params["sub_cluster_id"] = self._sub_cluster_id
+        
+        if self._main_cluster_id is not None:
+            base_query += " AND main_cluster_id = @main_cluster_id"
+            all_params["main_cluster_id"] = self._main_cluster_id
+        
+        # Add all other filters
+        for filter_obj in self._filters:
+            base_query += f" AND ({filter_obj.condition})"
+            all_params.update(filter_obj.params)
+        
+        base_query += " ORDER BY placement ASC"
+        
+        return base_query, all_params
+    
+    def execute(self) -> List[Dict[str, Any]]:
+        """Execute the query and return matching participants."""
+        try:
+            query, params = self._build_sql_query()
+            
+            # Configure query job with parameters
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter(key, "STRING" if isinstance(value, str) else "INTEGER", value)
+                    for key, value in params.items()
+                ]
+            )
+            
+            # Execute query
+            query_job = self.client.query(query, job_config=job_config)
+            results = query_job.result()
+            
+            # Convert to list of dictionaries
+            participants = []
+            for row in results:
+                participant = dict(row)
+                participants.append(participant)
+            
+            return participants
+            
+        except Exception as e:
+            logger.error(f"BigQuery query failed: {e}")
+            raise
+    
+    def get_stats(self) -> Optional[Dict[str, Any]]:
+        """Execute the query and return statistical summary."""
+        participants = self.execute()
+        if not participants:
+            return None
+        
+        count = len(participants)
+        avg_place = sum(p['placement'] for p in participants) / count
+        winrate = (sum(1 for p in participants if p['placement'] == 1) / count) * 100
+        top4_rate = (sum(1 for p in participants if p['placement'] <= 4) / count) * 100
+        
+        return {
+            'play_count': count,
+            'avg_placement': round(avg_place, 2),
+            'winrate': round(winrate, 2),
+            'top4_rate': round(top4_rate, 2)
+        }
+    
+    def get_participants(self) -> List[Dict[str, Any]]:
+        """Execute the query and return detailed participant data (alias for execute)."""
+        return self.execute()
+    
+    @staticmethod
+    def get_all_cluster_stats(min_size: int = 5, cluster_type: str = 'sub', project_id: str = None, dataset_id: str = 'tft_analytics') -> List[Dict[str, Any]]:
+        """
+        Get statistical summary for all clusters using BigQuery.
+        
+        Args:
+            min_size: Minimum cluster size to include
+            cluster_type: 'sub' for sub-clusters, 'main' for main clusters
+            project_id: GCP project ID
+            dataset_id: BigQuery dataset ID
+            
+        Returns:
+            List of cluster statistics sorted by frequency
+        """
+        if not HAS_BIGQUERY:
+            return []
+        
+        try:
+            # Note: This assumes cluster data will be added to the schema in the future
+            # For now, return empty list since cluster data isn't in the current schema
+            logger.warning("Cluster statistics not available - cluster data not in current BigQuery schema")
+            return []
+            
+        except Exception as e:
+            logger.error(f"BigQuery cluster stats query failed: {e}")
+            return []
+
+# ============================================================================
+# BIGQUERY-BASED HELPER FUNCTIONS
+# ============================================================================
+
+def get_compositions_in_cluster_bigquery(cluster_id: int, cluster_type: str = 'sub', limit: int = None, project_id: str = None, dataset_id: str = 'tft_analytics') -> List[Dict[str, Any]]:
+    """
+    Get all compositions in a specific cluster using BigQuery.
+    
+    Args:
+        cluster_id: ID of the cluster to retrieve
+        cluster_type: 'sub' for sub-clusters, 'main' for main clusters
+        limit: Maximum number of compositions to return
+        project_id: GCP project ID
+        dataset_id: BigQuery dataset ID
+        
+    Returns:
+        List of participant data for the cluster
+    """
+    if not HAS_BIGQUERY:
+        return []
+    
+    try:
+        # Note: This assumes cluster data will be added to the schema in the future
+        # For now, return empty list since cluster data isn't in the current schema
+        logger.warning("Cluster compositions not available - cluster data not in current BigQuery schema")
+        return []
+            
+    except Exception as e:
+        logger.error(f"BigQuery cluster composition query failed: {e}")
+        return []
+
+def print_cluster_compositions_bigquery(cluster_id: int, cluster_type: str = 'sub', max_samples: int = 5, project_id: str = None, dataset_id: str = 'tft_analytics'):
+    """
+    Print detailed breakdown of compositions in a specific cluster using BigQuery.
+    
+    Args:
+        cluster_id: ID of the cluster to analyze
+        cluster_type: 'sub' for sub-clusters, 'main' for main clusters
+        max_samples: Maximum number of sample compositions to show
+        project_id: GCP project ID
+        dataset_id: BigQuery dataset ID
+    """
+    comps = get_compositions_in_cluster_bigquery(cluster_id, cluster_type, limit=max_samples * 2, project_id=project_id, dataset_id=dataset_id)
+    
+    if not comps:
+        print(f"No compositions found for {cluster_type}-cluster {cluster_id} (cluster data not available)")
+        return
+    
+    cluster_label = f"{cluster_type.upper()}-CLUSTER {cluster_id}"
+    print(f"=== {cluster_label} ANALYSIS ===")
+    print(f"Total compositions: {len(comps)}")
+    
+    # Calculate cluster statistics
+    avg_place = sum(c['placement'] for c in comps) / len(comps)
+    winrate = sum(1 for c in comps if c['placement'] == 1) / len(comps) * 100
+    top4_rate = sum(1 for c in comps if c['placement'] <= 4) / len(comps) * 100
+    
+    print(f"Performance: {avg_place:.2f} avg place, {winrate:.1f}% winrate, {top4_rate:.1f}% top4 rate")
+    
+    # Show sample compositions
+    print(f"\nSample compositions (showing up to {max_samples}):")
+    for i, comp in enumerate(comps[:max_samples], 1):
+        print(f"\n  Sample {i}: Placement {comp['placement']}, Level {comp['level']}, Round {comp.get('last_round', 'N/A')}")
+        print(f"    Note: Detailed unit analysis requires cluster data implementation")
+
+# ============================================================================
 # DATABASE-BASED HELPER FUNCTIONS
 # ============================================================================
 
@@ -1582,7 +2187,10 @@ def print_cluster_compositions_db(cluster_id: int, cluster_type: str = 'sub', ma
 
 
 # For backward compatibility, create an alias that automatically selects the best available implementation
-if HAS_DATABASE:
+if HAS_BIGQUERY:
+    TFTQuery = TFTQueryBigQuery
+    logger.info("Using BigQuery-backed TFT querying")
+elif HAS_DATABASE:
     TFTQuery = TFTQueryDB
     logger.info("Using database-backed TFT querying")
 elif HAS_FILE_SUPPORT:
