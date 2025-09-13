@@ -10,7 +10,7 @@ Includes rate limiting, player lookup, match history, and bulk data collection.
 # ===============================
 
 API_KEY = "RGAPI-8f1ac1aa-6036-464e-b5eb-fe230efe8782"  # Replace with your actual Riot API key
-days = 44
+days = 45
 START_TIMESTAMP = (130032000 + (days * 86400))  # Epoch timestamp for period-based collection
 # 0 is June 16th, 2021, counts seconds from them 
 # 130002000 is July 30th 2025
