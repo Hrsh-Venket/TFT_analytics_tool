@@ -10,6 +10,7 @@ from google.cloud.exceptions import NotFound, Conflict
 import pandas as pd
 from datetime import datetime
 import json
+from name_mapper import map_match_data, get_mapper
 
 class BigQueryDataImporter:
     """
@@ -28,6 +29,11 @@ class BigQueryDataImporter:
         
         # Ensure dataset exists
         self.create_dataset_if_not_exists()
+        
+        # Initialize name mapper and log mapping stats
+        mapper = get_mapper()
+        mapping_stats = mapper.get_mapping_stats()
+        print(f"📝 Name mappings loaded: {mapping_stats['units']} units, {mapping_stats['traits']} traits, {mapping_stats['items']} items")
         
     def create_dataset_if_not_exists(self):
         """Create BigQuery dataset if it doesn't exist"""
@@ -164,10 +170,13 @@ class BigQueryDataImporter:
         """Insert TFT match data into BigQuery tables"""
         
         try:
-            #extract match metadata
-            metadata = match_data['metadata']
-            info = match_data['info']
-            collection_info = match_data.get('collection_info', {})
+            # Apply name mappings to clean unit, trait, and item names
+            mapped_match_data = map_match_data(match_data)
+            
+            #extract match metadata (from mapped data)
+            metadata = mapped_match_data['metadata']
+            info = mapped_match_data['info']
+            collection_info = mapped_match_data.get('collection_info', {})
             
             # convert game_datetime from milliseconds to ISO format string for BigQuery
             game_datetime = datetime.fromtimestamp(info['game_datetime'] / 1000).isoformat()

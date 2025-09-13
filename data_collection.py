@@ -9,7 +9,7 @@ Includes rate limiting, player lookup, match history, and bulk data collection.
 # CONFIGURATION - EDIT THESE VALUES
 # ===============================
 
-API_KEY = "RGAPI-90d45e80-03c4-46d5-bf9d-0abc587688c0"  # Replace with your actual Riot API key
+API_KEY = "RGAPI-8f1ac1aa-6036-464e-b5eb-fe230efe8782"  # Replace with your actual Riot API key
 days = 44
 START_TIMESTAMP = (130032000 + (days * 86400))  # Epoch timestamp for period-based collection
 # 0 is June 16th, 2021, counts seconds from them 
