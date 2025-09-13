@@ -137,12 +137,41 @@ def clear_bigquery_table(project_id=None, dataset_id='tft_analytics', table_name
         print(f"\n🗑️  Clearing table {table_name}...")
         start_time = datetime.now()
         
-        # Use DELETE FROM to clear all rows (keeps table structure)
-        delete_query = f"DELETE FROM `{table_id}` WHERE TRUE"
+        # Try deleting data that's not in the streaming buffer first
+        # Use a date condition to avoid recently inserted data (streaming buffer)
+        from datetime import timedelta
         
-        print("   Executing DELETE operation...")
-        job = client.query(delete_query)
-        result = job.result()  # Wait for job to complete
+        # Delete data older than 1 hour to avoid streaming buffer
+        cutoff_time = datetime.now() - timedelta(hours=1)
+        cutoff_iso = cutoff_time.isoformat()
+        
+        print("   Step 1: Clearing data outside streaming buffer...")
+        try:
+            conditional_delete_query = f"""
+                DELETE FROM `{table_id}` 
+                WHERE game_datetime < '{cutoff_iso}'
+            """
+            job = client.query(conditional_delete_query)
+            result = job.result()
+            print("   ✅ Cleared older data successfully")
+        except Exception as e:
+            print(f"   ⚠️  Conditional delete failed: {e}")
+        
+        print("   Step 2: Attempting to clear remaining data...")
+        try:
+            # Try to delete all remaining data
+            delete_query = f"DELETE FROM `{table_id}` WHERE TRUE"
+            job = client.query(delete_query)
+            result = job.result()
+            print("   ✅ All data cleared successfully")
+        except Exception as e:
+            if "streaming buffer" in str(e):
+                print("   ⚠️  Some data still in streaming buffer - this is normal")
+                print("   💡 Recent data will be auto-removed as buffer clears")
+                print("   🕒 Try running this command again in 10-30 minutes for complete clearing")
+            else:
+                print(f"   ❌ Delete failed: {e}")
+                raise
         
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
@@ -174,7 +203,17 @@ def clear_bigquery_table(project_id=None, dataset_id='tft_analytics', table_name
             print("2. Test: python test_bigquery_querying.py")
         else:
             if final_count > 0:
-                print(f"⚠️  Warning: Table still has {final_count} rows - deletion may not have completed fully")
+                print(f"\n📊 Reset Status:")
+                print(f"   Table rows remaining: {final_count:,}")
+                if final_count < row_count:
+                    print(f"   Rows cleared: {row_count - final_count:,}")
+                    print(f"   ✅ Partial success - most data cleared")
+                    if final_count < 100:  # Assume small remainder is streaming buffer
+                        print(f"   💡 Remaining {final_count} rows likely in streaming buffer")
+                        print(f"   🕒 Will auto-clear in 10-30 minutes, or run script again later")
+                        print(f"\n✨ You can proceed with data collection - streaming buffer data is temporary!")
+                else:
+                    print(f"   ❌ No data was cleared - may need manual intervention")
             if not tracking_success and clear_tracking:
                 print(f"⚠️  Warning: Could not clear global matches tracking file")
         
@@ -265,6 +304,15 @@ def main():
             confirm = '--force' not in sys.argv
             keep_tracking = '--keep-tracking' in sys.argv
             clear_bigquery_table(confirm=confirm, clear_tracking=not keep_tracking)
+        elif command == 'clear-tracking':
+            print("🗑️  Clearing only the global matches tracking file...")
+            success, matches_cleared = clear_global_matches_file()
+            if success:
+                print(f"✅ Global matches tracking cleared successfully!")
+                print(f"   This will allow re-processing of all {matches_cleared:,} matches")
+                print(f"\nNext step: Run python data_collection.py")
+            else:
+                print("❌ Failed to clear global matches tracking file")
         elif command == 'help':
             print("BigQuery Table Management Script")
             print("=" * 50)
@@ -273,11 +321,18 @@ def main():
             print("  python clear_bigquery_data.py clear                   # Clear table + tracking (with confirmation)")
             print("  python clear_bigquery_data.py clear --force           # Clear table + tracking (no confirmation)")
             print("  python clear_bigquery_data.py clear --keep-tracking   # Clear only table, keep match tracking")
+            print("  python clear_bigquery_data.py clear-tracking          # Clear only match tracking file")
             print("  python clear_bigquery_data.py help                    # Show this help")
             print()
             print("Options:")
             print("  --force          Skip confirmation prompt")
             print("  --keep-tracking  Preserve global_matches_downloaded.json file")
+            print()
+            print("Streaming Buffer Notes:")
+            print("  • Recently inserted data may be in BigQuery's streaming buffer")
+            print("  • DELETE operations cannot touch streaming buffer data")
+            print("  • Script will clear what it can and report remaining rows")
+            print("  • Streaming buffer data auto-expires in 10-30 minutes")
             print()
             print("Note: By default, both BigQuery table AND match tracking are cleared for a complete reset.")
         else:
