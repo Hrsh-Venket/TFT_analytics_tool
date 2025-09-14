@@ -1,0 +1,25 @@
+# TFT Analytics API Server Requirements
+
+# Web Framework
+Flask==2.3.3
+Flask-CORS==4.0.0
+Werkzeug==2.3.7
+
+# Data Processing (already have these for your existing system)
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# Google Cloud (already have for BigQuery)
+google-cloud-bigquery>=3.11.0
+
+# Production Server (add these for deployment)
+gunicorn>=21.2.0
+gevent>=23.7.0
+
+# Optional: Enhanced logging and monitoring
+sentry-sdk[flask]>=1.32.0
+
+# Development/Testing
+pytest>=7.4.0
+requests>=2.31.0
