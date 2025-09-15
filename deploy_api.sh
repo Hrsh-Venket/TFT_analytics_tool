@@ -32,6 +32,23 @@ pip install -r requirements_api.txt
 # Install additional dependencies for your existing system
 pip install google-cloud-bigquery pandas numpy scikit-learn
 
+# Check if authentication is set up
+CREDENTIALS_FILE="/opt/tft-analytics/credentials.json"
+if [ ! -f "$CREDENTIALS_FILE" ]; then
+    echo ""
+    echo "🔐 Authentication Setup Required"
+    echo "Service account credentials not found at: $CREDENTIALS_FILE"
+    echo ""
+    echo "Please run the authentication setup first:"
+    echo "  chmod +x setup_auth.sh"
+    echo "  ./setup_auth.sh"
+    echo ""
+    echo "Then re-run this deployment script."
+    exit 1
+fi
+
+echo "✅ Service account credentials found"
+
 echo "Testing API server..."
 # Run a quick test to make sure imports work
 python3 -c "
@@ -46,8 +63,8 @@ except ImportError as e:
     sys.exit(1)
 "
 
-# Create systemd service file
-echo "Creating systemd service..."
+# Create systemd service file with authentication
+echo "Creating systemd service with BigQuery authentication..."
 sudo tee /etc/systemd/system/tft-api.service > /dev/null <<EOF
 [Unit]
 Description=TFT Analytics API Server
@@ -61,10 +78,13 @@ WorkingDirectory=$(pwd)
 Environment=PATH=$(pwd)/venv/bin
 Environment=TFT_TEST_MODE=false
 Environment=ENVIRONMENT=production
+Environment=GOOGLE_APPLICATION_CREDENTIALS=$CREDENTIALS_FILE
 ExecStart=$(pwd)/venv/bin/gunicorn -c gunicorn_config.py api_server:app
 ExecReload=/bin/kill -s HUP \$MAINPID
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -121,12 +141,29 @@ sudo nginx -t  # Test configuration
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
-# Configure firewall
+# Configure firewall (using iptables as fallback for ufw)
 echo "Configuring firewall..."
-sudo ufw allow 22/tcp   # SSH
-sudo ufw allow 80/tcp   # HTTP
-sudo ufw allow 443/tcp  # HTTPS (for future SSL setup)
-sudo ufw --force enable
+if command -v ufw &> /dev/null; then
+    sudo ufw allow 22/tcp   # SSH
+    sudo ufw allow 80/tcp   # HTTP
+    sudo ufw allow 443/tcp  # HTTPS (for future SSL setup)
+    sudo ufw --force enable
+else
+    echo "UFW not available, using iptables..."
+    # Allow SSH (port 22)
+    sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    # Allow HTTP (port 80)
+    sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+    # Allow HTTPS (port 443)
+    sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+    # Allow established connections
+    sudo iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    # Allow loopback
+    sudo iptables -A INPUT -i lo -j ACCEPT
+    # Save iptables rules
+    sudo apt install -y iptables-persistent
+    sudo netfilter-persistent save
+fi
 
 # Start the API service
 echo "Starting TFT Analytics API service..."
@@ -146,6 +183,10 @@ echo "- API Server: http://$(curl -s ifconfig.me)/api/health"
 echo "- Nginx: $(sudo systemctl is-active nginx)"
 echo "- TFT API: $(sudo systemctl is-active tft-api)"
 echo ""
+echo "Authentication:"
+echo "- Service Account: $(basename "$CREDENTIALS_FILE")"
+echo "- Credentials: $CREDENTIALS_FILE"
+echo ""
 echo "Commands:"
 echo "- Check logs: sudo journalctl -u tft-api.service -f"
 echo "- Restart API: sudo systemctl restart tft-api.service"
@@ -153,8 +194,9 @@ echo "- Stop API: sudo systemctl stop tft-api.service"
 echo ""
 echo "Next Steps:"
 echo "1. Test API: curl http://$(curl -s ifconfig.me)/api/health"
-echo "2. Configure your domain/SSL if needed"
-echo "3. Update Firebase webapp with your API URL"
-echo "4. Monitor logs for any issues"
+echo "2. Test BigQuery: curl http://$(curl -s ifconfig.me)/api/stats"
+echo "3. Configure your domain/SSL if needed"
+echo "4. Update Firebase webapp with your API URL"
+echo "5. Monitor logs for any issues"
 echo ""
 echo "Your API is now ready for Firebase integration!"
