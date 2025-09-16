@@ -26,7 +26,7 @@ echo "🔧 Deploying get-stats function..."
 gcloud functions deploy api-stats \
     --source=functions/get-stats \
     --runtime=$RUNTIME \
-    --trigger=http \
+    --trigger-http \
     --allow-unauthenticated \
     --region=$REGION \
     --memory=512MB \
@@ -40,7 +40,7 @@ echo "🔧 Deploying get-clusters function..."
 gcloud functions deploy api-clusters \
     --source=functions/get-clusters \
     --runtime=$RUNTIME \
-    --trigger=http \
+    --trigger-http \
     --allow-unauthenticated \
     --region=$REGION \
     --memory=1GB \
@@ -54,7 +54,7 @@ echo "🔧 Deploying execute-query function..."
 gcloud functions deploy api-query \
     --source=functions/execute-query \
     --runtime=$RUNTIME \
-    --trigger=http \
+    --trigger-http \
     --allow-unauthenticated \
     --region=$REGION \
     --memory=1GB \
@@ -68,7 +68,7 @@ echo "🔧 Deploying cluster-details function..."
 gcloud functions deploy api-cluster-details \
     --source=functions/cluster-details \
     --runtime=$RUNTIME \
-    --trigger=http \
+    --trigger-http \
     --allow-unauthenticated \
     --region=$REGION \
     --memory=512MB \
