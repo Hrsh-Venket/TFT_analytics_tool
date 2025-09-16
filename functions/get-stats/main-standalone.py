@@ -1,18 +1,51 @@
 """
-Cloud Function: GET /api/stats
+Cloud Function: GET /api/stats - Standalone version
 Returns BigQuery dataset statistics for TFT analytics dashboard
 """
 
-import sys
-import os
-
-from utils import handle_cors_preflight, json_response, error_response, get_bigquery_client
-from bigquery_operations import BigQueryDataImporter
+import json
+from datetime import datetime
+from typing import Dict, Any
 import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Embedded utility functions
+def cors_headers(origin: str = '*') -> Dict[str, str]:
+    """Standard CORS headers for Firebase frontend"""
+    return {
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Max-Age': '3600'
+    }
+
+def handle_cors_preflight(request):
+    """Handle CORS preflight requests"""
+    if request.method == 'OPTIONS':
+        headers = cors_headers()
+        return ('', 204, headers)
+    return None
+
+def json_response(data: Any, status: int = 200) -> tuple:
+    """Create JSON response with CORS headers"""
+    headers = cors_headers()
+    headers['Content-Type'] = 'application/json'
+    return (json.dumps(data), status, headers)
+
+def error_response(message: str, status: int = 500) -> tuple:
+    """Create error response with CORS headers"""
+    return json_response({'error': message}, status)
+
+def get_bigquery_client():
+    """Get BigQuery client with error handling"""
+    try:
+        from google.cloud import bigquery
+        return bigquery.Client()
+    except Exception as e:
+        raise Exception(f"Failed to initialize BigQuery client: {str(e)}")
 
 def get_stats(request):
     """
@@ -28,10 +61,13 @@ def get_stats(request):
     try:
         # Initialize BigQuery connection
         logger.info("Initializing BigQuery connection for stats")
-        importer = BigQueryDataImporter()
-
-        # Get basic statistics from BigQuery
         client = get_bigquery_client()
+
+        # Use your existing dataset configuration
+        project_id = client.project
+        dataset_id = 'tft_analytics'
+        matches_table = f"{project_id}.{dataset_id}.matches"
+        participants_table = f"{project_id}.{dataset_id}.participants"
 
         # Query match statistics
         matches_query = f"""
@@ -40,7 +76,7 @@ def get_stats(request):
             COUNT(DISTINCT game_version) as versions_covered,
             MIN(game_datetime) as earliest_match,
             MAX(game_datetime) as latest_match
-        FROM `{importer.matches_table}`
+        FROM `{matches_table}`
         """
 
         # Query participant statistics
@@ -49,7 +85,7 @@ def get_stats(request):
             COUNT(*) as total_participants,
             AVG(level) as avg_level,
             AVG(placement) as avg_placement
-        FROM `{importer.participants_table}`
+        FROM `{participants_table}`
         """
 
         logger.info("Executing BigQuery statistics queries")

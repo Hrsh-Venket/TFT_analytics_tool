@@ -5,7 +5,6 @@ Executes TFT queries using the existing querying.py system
 
 import sys
 import os
-sys.path.append('./shared')
 
 from utils import handle_cors_preflight, json_response, error_response, get_bigquery_client
 from querying import TFTQuery

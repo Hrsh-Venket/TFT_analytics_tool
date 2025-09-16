@@ -5,7 +5,6 @@ Returns detailed information about a specific cluster
 
 import sys
 import os
-sys.path.append('./shared')
 
 from utils import handle_cors_preflight, json_response, error_response, get_bigquery_client
 from bigquery_operations import BigQueryDataImporter
