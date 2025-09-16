@@ -23,9 +23,12 @@ class BigQueryDataImporter:
         self.dataset_id = dataset_id
         self.project_id = project_id or self.client.project
         
-        # Table references for BigQuery operations
-        self.matches_table = f"{self.project_id}.{self.dataset_id}.matches"
-        self.participants_table = f"{self.project_id}.{self.dataset_id}.participants"
+        # Table references for BigQuery operations (using actual table structure)
+        self.match_participants_table = f"{self.project_id}.{self.dataset_id}.match_participants"
+
+        # Legacy compatibility properties for existing code
+        self.matches_table = self.match_participants_table
+        self.participants_table = self.match_participants_table
         
         # Ensure dataset exists
         self.create_dataset_if_not_exists()
