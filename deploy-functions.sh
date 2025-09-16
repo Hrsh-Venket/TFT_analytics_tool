@@ -31,7 +31,8 @@ gcloud functions deploy api-stats \
     --region=$REGION \
     --memory=512MB \
     --timeout=30s \
-    --max-instances=10
+    --max-instances=10 \
+    --no-gen2
 
 echo "✅ api-stats deployed"
 
@@ -45,7 +46,8 @@ gcloud functions deploy api-clusters \
     --region=$REGION \
     --memory=1GB \
     --timeout=60s \
-    --max-instances=10
+    --max-instances=10 \
+    --no-gen2
 
 echo "✅ api-clusters deployed"
 
@@ -59,7 +61,8 @@ gcloud functions deploy api-query \
     --region=$REGION \
     --memory=1GB \
     --timeout=60s \
-    --max-instances=10
+    --max-instances=10 \
+    --no-gen2
 
 echo "✅ api-query deployed"
 
@@ -73,7 +76,8 @@ gcloud functions deploy api-cluster-details \
     --region=$REGION \
     --memory=512MB \
     --timeout=30s \
-    --max-instances=5
+    --max-instances=5 \
+    --no-gen2
 
 echo "✅ api-cluster-details deployed"
 
