@@ -148,6 +148,8 @@ class TFTClusteringEngine:
         
         if TEST_MODE:
             logger.info("🧪 TFT Clustering running in TEST MODE")
+        else:
+            logger.info("🔥 TFT Clustering running in PRODUCTION MODE - using full BigQuery dataset")
     
     def extract_carry_units(self, participant: dict) -> FrozenSet[str]:
         """
@@ -168,15 +170,24 @@ class TFTClusteringEngine:
         
         return carry_units
     
-    def load_compositions_from_bigquery(self, 
+    def load_compositions_from_bigquery(self,
                                         filters: Optional[Dict[str, Any]] = None,
                                         limit: Optional[int] = None) -> None:
         """Load and process compositions from BigQuery database."""
-        logger.info("Loading compositions from BigQuery...")
-        
         if TEST_MODE:
+            logger.info("🧪 Loading TEST compositions (mock data)...")
             self._load_test_compositions(limit or 1000)
             return
+
+        logger.info("🔥 Loading compositions from PRODUCTION BigQuery...")
+        if limit:
+            logger.info(f"   Limited to {limit} compositions for testing")
+        else:
+            logger.info("   Processing FULL BigQuery dataset (no limit)")
+
+        logger.info(f"   Project: {self.project_id}")
+        logger.info(f"   Dataset: {self.dataset_id}")
+        logger.info(f"   Table: {self.table_id}")
         
         try:
             # Build base query
@@ -1031,7 +1042,7 @@ def main():
     # Test clustering with small sample
     try:
         print("\n1. Running clustering analysis...")
-        results = run_clustering_analysis(limit=200 if not TEST_MODE else None)
+        results = run_clustering_analysis(limit=None if not TEST_MODE else 200)
         
         stats = results['statistics']
         print("[SUCCESS] Clustering analysis completed:")
