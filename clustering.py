@@ -45,6 +45,7 @@ try:
 except ImportError:
     logger.warning("BigQuery dependencies not available - install google-cloud-bigquery")
     bigquery = None
+    NotFound = Exception  # Fallback for test mode
 
 # Test Mode Configuration
 TEST_MODE = os.getenv('TFT_TEST_MODE', 'false').lower() == 'true'
@@ -701,11 +702,11 @@ class TFTClusteringEngine:
     def get_cluster_details(self, cluster_id: int, cluster_type: str = 'main') -> Optional[Dict[str, Any]]:
         """
         Get detailed information about a specific cluster.
-        
+
         Args:
             cluster_id: ID of the cluster
             cluster_type: 'main' or 'sub'
-            
+
         Returns:
             Detailed cluster information or None if not found
         """
@@ -728,7 +729,7 @@ class TFTClusteringEngine:
                                 'avg_placement': sc.avg_placement,
                                 'carries': list(sc.carry_set)
                             }
-                            for sc in self.sub_clusters 
+                            for sc in self.sub_clusters
                             if sc.id in cluster.sub_cluster_ids
                         ],
                         'sample_compositions': [
@@ -765,8 +766,125 @@ class TFTClusteringEngine:
                             for comp in cluster.compositions[:5]  # First 5 samples
                         ]
                     }
-        
+
         return None
+
+    def save_clusters_to_bigquery(self) -> bool:
+        """
+        Save clustering results to BigQuery tables.
+        Creates main_clusters and sub_clusters tables and inserts the data.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not HAS_BIGQUERY or TEST_MODE:
+            logger.warning("Cannot save to BigQuery: dependencies unavailable or test mode active")
+            return False
+
+        try:
+            logger.info("Creating cluster tables in BigQuery...")
+
+            # Create main_clusters table
+            main_clusters_schema = [
+                bigquery.SchemaField("id", "INTEGER", mode="REQUIRED"),
+                bigquery.SchemaField("size", "INTEGER", mode="REQUIRED"),
+                bigquery.SchemaField("avg_placement", "FLOAT64", mode="NULLABLE"),
+                bigquery.SchemaField("winrate", "FLOAT64", mode="NULLABLE"),
+                bigquery.SchemaField("top4_rate", "FLOAT64", mode="NULLABLE"),
+                bigquery.SchemaField("common_carries", "STRING", mode="REPEATED"),
+                bigquery.SchemaField("top_units_display", "STRING", mode="NULLABLE"),
+                bigquery.SchemaField("sub_cluster_ids", "INTEGER", mode="REPEATED"),
+                bigquery.SchemaField("analysis_date", "TIMESTAMP", mode="NULLABLE")
+            ]
+
+            main_table_id = f"{self.project_id}.{self.dataset_id}.main_clusters"
+            main_table = bigquery.Table(main_table_id, schema=main_clusters_schema)
+
+            # Create sub_clusters table
+            sub_clusters_schema = [
+                bigquery.SchemaField("id", "INTEGER", mode="REQUIRED"),
+                bigquery.SchemaField("carry_set", "STRING", mode="REPEATED"),
+                bigquery.SchemaField("size", "INTEGER", mode="REQUIRED"),
+                bigquery.SchemaField("avg_placement", "FLOAT64", mode="NULLABLE"),
+                bigquery.SchemaField("winrate", "FLOAT64", mode="NULLABLE"),
+                bigquery.SchemaField("top4_rate", "FLOAT64", mode="NULLABLE"),
+                bigquery.SchemaField("analysis_date", "TIMESTAMP", mode="NULLABLE")
+            ]
+
+            sub_table_id = f"{self.project_id}.{self.dataset_id}.sub_clusters"
+            sub_table = bigquery.Table(sub_table_id, schema=sub_clusters_schema)
+
+            # Create tables (delete existing first to avoid conflicts)
+            try:
+                self.client.delete_table(main_table_id)
+                logger.info("Deleted existing main_clusters table")
+            except NotFound:
+                pass
+
+            try:
+                self.client.delete_table(sub_table_id)
+                logger.info("Deleted existing sub_clusters table")
+            except NotFound:
+                pass
+
+            # Create new tables
+            self.client.create_table(main_table)
+            self.client.create_table(sub_table)
+            logger.info("Created cluster tables successfully")
+
+            # Prepare data for insertion
+            current_time = datetime.now().isoformat()
+
+            # Insert main clusters
+            if self.main_clusters:
+                main_rows = []
+                for cluster in self.main_clusters:
+                    main_rows.append({
+                        'id': cluster.id,
+                        'size': cluster.size,
+                        'avg_placement': cluster.avg_placement,
+                        'winrate': cluster.winrate,
+                        'top4_rate': cluster.top4_rate,
+                        'common_carries': cluster.common_carries,
+                        'top_units_display': cluster.top_units_display,
+                        'sub_cluster_ids': cluster.sub_cluster_ids,
+                        'analysis_date': current_time
+                    })
+
+                main_table_ref = self.client.get_table(main_table_id)
+                errors = self.client.insert_rows_json(main_table_ref, main_rows)
+                if errors:
+                    logger.error(f"Main clusters insert errors: {errors}")
+                    return False
+                logger.info(f"Inserted {len(main_rows)} main clusters")
+
+            # Insert sub clusters
+            if self.sub_clusters:
+                sub_rows = []
+                for cluster in self.sub_clusters:
+                    sub_rows.append({
+                        'id': cluster.id,
+                        'carry_set': list(cluster.carry_set),
+                        'size': cluster.size,
+                        'avg_placement': cluster.avg_placement,
+                        'winrate': cluster.winrate,
+                        'top4_rate': cluster.top4_rate,
+                        'analysis_date': current_time
+                    })
+
+                sub_table_ref = self.client.get_table(sub_table_id)
+                errors = self.client.insert_rows_json(sub_table_ref, sub_rows)
+                if errors:
+                    logger.error(f"Sub clusters insert errors: {errors}")
+                    return False
+                logger.info(f"Inserted {len(sub_rows)} sub clusters")
+
+            logger.info("✅ Successfully saved clustering results to BigQuery")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving clusters to BigQuery: {e}")
+            return False
 
 
 def run_clustering_analysis(project_id: Optional[str] = None,
@@ -808,7 +926,12 @@ def run_clustering_analysis(project_id: Optional[str] = None,
         
         # Generate statistics
         stats = engine.get_clustering_statistics()
-        
+
+        # Save clusters to BigQuery tables
+        save_success = engine.save_clusters_to_bigquery()
+        if not save_success:
+            logger.warning("Failed to save clusters to BigQuery - results available in memory only")
+
         # Get cluster summaries
         main_cluster_summary = engine.get_cluster_summary('main', top_n=10)
         sub_cluster_summary = engine.get_cluster_summary('sub', top_n=20)
