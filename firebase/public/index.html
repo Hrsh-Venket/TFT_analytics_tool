@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TFT Analytics Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">TFT Analytics Dashboard</h1>
+            <p class="text-gray-600">Teamfight Tactics composition analysis powered by BigQuery</p>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <div class="mb-6">
+            <nav class="flex space-x-4">
+                <button id="tab-overview" class="tab-button px-4 py-2 bg-blue-500 text-white rounded">Overview</button>
+                <button id="tab-clusters" class="tab-button px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Clusters</button>
+                <button id="tab-query" class="tab-button px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Query</button>
+                <button id="tab-logs" class="tab-button px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Status</button>
+            </nav>
+        </div>
+
+        <!-- Tab Contents -->
+
+        <!-- Overview Tab -->
+        <div id="content-overview" class="tab-content">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div id="stats-loading" class="col-span-3 text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    <p class="mt-2 text-gray-600">Loading statistics...</p>
+                </div>
+                <div id="stats-container" class="col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6 hidden">
+                    <!-- Stats cards will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Clusters Tab -->
+        <div id="content-clusters" class="tab-content hidden">
+            <div class="mb-6">
+                <h2 class="text-2xl font-semibold mb-4">Composition Clusters</h2>
+                <div id="clusters-loading" class="text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                    <p class="mt-2 text-gray-600">Loading clusters...</p>
+                </div>
+                <div id="clusters-container" class="hidden">
+                    <!-- Clusters will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Query Tab -->
+        <div id="content-query" class="tab-content hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div>
+                    <h2 class="text-2xl font-semibold mb-4">TFT Query Builder</h2>
+                    <form id="query-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Query</label>
+                            <textarea id="query-input" class="w-full p-3 border border-gray-300 rounded-md font-mono text-sm"
+                                      rows="4" placeholder="TFTQuery().add_unit('Jinx').get_stats()"></textarea>
+                        </div>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded">
+                            Execute Query
+                        </button>
+                    </form>
+
+                    <div class="mt-6">
+                        <h3 class="text-lg font-medium mb-2">Query Examples</h3>
+                        <div class="space-y-2 text-sm">
+                            <button class="example-query block w-full text-left p-2 bg-gray-50 hover:bg-gray-100 rounded"
+                                    data-query="TFTQuery().add_unit('Jinx').get_stats()">
+                                Unit statistics: TFTQuery().add_unit('Jinx').get_stats()
+                            </button>
+                            <button class="example-query block w-full text-left p-2 bg-gray-50 hover:bg-gray-100 rounded"
+                                    data-query="TFTQuery().add_trait('Star_Guardian').get_participants()[:10]">
+                                Trait participants: TFTQuery().add_trait('Star_Guardian').get_participants()[:10]
+                            </button>
+                            <button class="example-query block w-full text-left p-2 bg-gray-50 hover:bg-gray-100 rounded"
+                                    data-query="TFTQuery().add_unit('Jinx').add_unit('Aphelios').get_stats()">
+                                Multiple units: TFTQuery().add_unit('Jinx').add_unit('Aphelios').get_stats()
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-2xl font-semibold mb-4">Results</h2>
+                    <div id="query-results" class="bg-white p-4 border border-gray-300 rounded-md min-h-64">
+                        <p class="text-gray-500">Execute a query to see results here</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Tab -->
+        <div id="content-logs" class="tab-content hidden">
+            <h2 class="text-2xl font-semibold mb-4">System Status</h2>
+            <div id="status-container" class="space-y-4">
+                <div class="bg-white p-4 border border-gray-300 rounded-md">
+                    <h3 class="font-medium mb-2">Cloud Functions Status</h3>
+                    <div id="functions-status" class="space-y-2">
+                        <!-- Function status will be populated -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

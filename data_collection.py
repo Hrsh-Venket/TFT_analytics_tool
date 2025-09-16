@@ -40,7 +40,7 @@ from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-try: 
+try:
     from google.cloud import bigquery
     from bigquery_operations import BigQueryDataImporter
     from google.cloud.exceptions import NotFound, Forbidden
