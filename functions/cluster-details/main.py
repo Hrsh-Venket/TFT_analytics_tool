@@ -71,7 +71,7 @@ def cluster_details(request):
         WHERE id = @cluster_id
         """
 
-        job_config = client.query_job_config()
+        job_config = bigquery.QueryJobConfig()
         job_config.query_parameters = [
             bigquery.ScalarQueryParameter("cluster_id", "INT64", cluster_id)
         ]
@@ -100,7 +100,7 @@ def cluster_details(request):
                 ORDER BY size DESC
                 """
 
-                sub_job_config = client.query_job_config()
+                sub_job_config = bigquery.QueryJobConfig()
                 sub_job_config.query_parameters = [
                     bigquery.ArrayQueryParameter("sub_cluster_ids", "INT64", sub_cluster_ids)
                 ]

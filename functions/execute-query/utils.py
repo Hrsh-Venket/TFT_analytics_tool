@@ -27,7 +27,7 @@ def json_response(data: Any, status: int = 200) -> tuple:
     """Create JSON response with CORS headers"""
     headers = cors_headers()
     headers['Content-Type'] = 'application/json'
-    return (json.dumps(data), status, headers)
+    return (json.dumps(data, default=str), status, headers)  # Handle datetime serialization
 
 def error_response(message: str, status: int = 500) -> tuple:
     """Create error response with CORS headers"""
