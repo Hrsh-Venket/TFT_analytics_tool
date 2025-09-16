@@ -67,7 +67,7 @@ def cluster_details(request):
             top_units_display,
             analysis_date,
             sub_cluster_ids
-        FROM `{importer.project_id}.{importer.dataset_id}.main_clusters`
+        FROM `{importer.main_clusters_table}`
         WHERE id = @cluster_id
         """
 
@@ -95,7 +95,7 @@ def cluster_details(request):
                     avg_placement,
                     winrate,
                     top4_rate
-                FROM `{importer.project_id}.{importer.dataset_id}.sub_clusters`
+                FROM `{importer.sub_clusters_table}`
                 WHERE id IN UNNEST(@sub_cluster_ids)
                 ORDER BY size DESC
                 """

@@ -18,14 +18,19 @@ class BigQueryDataImporter:
     Handles table creation, data insertion, and querying operations.
     """
     
-    def __init__(self, project_id=None, dataset_id='tft_analytics'):
+    def __init__(self, project_id=None, dataset_id='tft_analytics', cluster_dataset_id='tft_clusters'):
         self.client = bigquery.Client(project=project_id)  # Auto-auth on GCP VM
         self.dataset_id = dataset_id
+        self.cluster_dataset_id = cluster_dataset_id
         self.project_id = project_id or self.client.project
-        
-        # Table references for BigQuery operations
+
+        # Table references for BigQuery operations (match data)
         self.matches_table = f"{self.project_id}.{self.dataset_id}.matches"
         self.participants_table = f"{self.project_id}.{self.dataset_id}.participants"
+
+        # Cluster table references (separate dataset)
+        self.main_clusters_table = f"{self.project_id}.{self.cluster_dataset_id}.main_clusters"
+        self.sub_clusters_table = f"{self.project_id}.{self.cluster_dataset_id}.sub_clusters"
         
         # Ensure dataset exists
         self.create_dataset_if_not_exists()

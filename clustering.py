@@ -109,17 +109,19 @@ class TFTClusteringEngine:
     Designed for Firebase webapp integration with comprehensive analysis capabilities.
     """
     
-    def __init__(self, 
-                 project_id: Optional[str] = None, 
+    def __init__(self,
+                 project_id: Optional[str] = None,
                  dataset_id: str = 'tft_analytics',
-                 min_sub_cluster_size: int = 5, 
+                 cluster_dataset_id: str = 'tft_clusters',
+                 min_sub_cluster_size: int = 5,
                  min_main_cluster_size: int = 3):
         """
         Initialize the BigQuery TFT clustering engine.
-        
+
         Args:
             project_id: GCP project ID (auto-detected if None)
-            dataset_id: BigQuery dataset ID
+            dataset_id: BigQuery dataset ID for match data
+            cluster_dataset_id: BigQuery dataset ID for cluster results
             min_sub_cluster_size: Minimum size for valid sub-clusters
             min_main_cluster_size: Minimum size for valid main clusters
         """
@@ -134,7 +136,11 @@ class TFTClusteringEngine:
             self.project_id = project_id or "test-project"
         
         self.dataset_id = dataset_id
+        self.cluster_dataset_id = cluster_dataset_id
         self.table_id = f"{self.project_id}.{self.dataset_id}.match_participants"
+
+        # Ensure cluster dataset exists
+        self.create_cluster_dataset_if_not_exists()
         
         # Clustering parameters
         self.min_sub_cluster_size = min_sub_cluster_size
@@ -150,6 +156,22 @@ class TFTClusteringEngine:
             logger.info("🧪 TFT Clustering running in TEST MODE")
         else:
             logger.info("🔥 TFT Clustering running in PRODUCTION MODE - using full BigQuery dataset")
+
+    def create_cluster_dataset_if_not_exists(self):
+        """Create BigQuery cluster dataset if it doesn't exist"""
+        if not HAS_BIGQUERY or TEST_MODE:
+            return
+
+        dataset_ref = self.client.dataset(self.cluster_dataset_id)
+        try:
+            self.client.get_dataset(dataset_ref)
+            logger.info(f"Cluster dataset {self.cluster_dataset_id} already exists")
+        except NotFound:
+            dataset = bigquery.Dataset(dataset_ref)
+            dataset.location = "US"  # Always Free tier location
+            dataset.description = "TFT clustering analysis results and computed cluster data"
+            self.client.create_dataset(dataset)
+            logger.info(f"✅ Created cluster dataset {self.cluster_dataset_id}")
     
     def extract_carry_units(self, participant: dict) -> FrozenSet[str]:
         """
@@ -808,7 +830,7 @@ class TFTClusteringEngine:
                 bigquery.SchemaField("analysis_date", "TIMESTAMP", mode="NULLABLE")
             ]
 
-            main_table_id = f"{self.project_id}.{self.dataset_id}.main_clusters"
+            main_table_id = f"{self.project_id}.{self.cluster_dataset_id}.main_clusters"
             main_table = bigquery.Table(main_table_id, schema=main_clusters_schema)
 
             # Create sub_clusters table
@@ -822,7 +844,7 @@ class TFTClusteringEngine:
                 bigquery.SchemaField("analysis_date", "TIMESTAMP", mode="NULLABLE")
             ]
 
-            sub_table_id = f"{self.project_id}.{self.dataset_id}.sub_clusters"
+            sub_table_id = f"{self.project_id}.{self.cluster_dataset_id}.sub_clusters"
             sub_table = bigquery.Table(sub_table_id, schema=sub_clusters_schema)
 
             # Create tables (delete existing first to avoid conflicts)
@@ -851,14 +873,14 @@ class TFTClusteringEngine:
                 main_rows = []
                 for cluster in self.main_clusters:
                     main_rows.append({
-                        'id': cluster.id,
-                        'size': cluster.size,
-                        'avg_placement': cluster.avg_placement,
-                        'winrate': cluster.winrate,
-                        'top4_rate': cluster.top4_rate,
+                        'id': int(cluster.id),
+                        'size': int(cluster.size),
+                        'avg_placement': float(cluster.avg_placement) if cluster.avg_placement else None,
+                        'winrate': float(cluster.winrate) if cluster.winrate else None,
+                        'top4_rate': float(cluster.top4_rate) if cluster.top4_rate else None,
                         'common_carries': cluster.common_carries,
                         'top_units_display': cluster.top_units_display,
-                        'sub_cluster_ids': cluster.sub_cluster_ids,
+                        'sub_cluster_ids': [int(x) for x in cluster.sub_cluster_ids],
                         'analysis_date': current_time
                     })
 
@@ -900,21 +922,23 @@ class TFTClusteringEngine:
 
 def run_clustering_analysis(project_id: Optional[str] = None,
                           dataset_id: str = 'tft_analytics',
+                          cluster_dataset_id: str = 'tft_clusters',
                           filters: Optional[Dict[str, Any]] = None,
                           min_sub_cluster_size: int = 5,
                           min_main_cluster_size: int = 3,
                           limit: Optional[int] = None) -> Dict[str, Any]:
     """
     Run complete clustering analysis on BigQuery data.
-    
+
     Args:
         project_id: GCP project ID (auto-detected if None)
-        dataset_id: BigQuery dataset ID
+        dataset_id: BigQuery dataset ID for match data
+        cluster_dataset_id: BigQuery dataset ID for cluster results
         filters: Optional filters for data selection
         min_sub_cluster_size: Minimum size for valid sub-clusters
         min_main_cluster_size: Minimum size for valid main clusters
         limit: Optional limit on compositions to analyze
-        
+
     Returns:
         Dictionary with clustering results and statistics
     """
@@ -925,6 +949,7 @@ def run_clustering_analysis(project_id: Optional[str] = None,
     engine = TFTClusteringEngine(
         project_id=project_id,
         dataset_id=dataset_id,
+        cluster_dataset_id=cluster_dataset_id,
         min_sub_cluster_size=min_sub_cluster_size,
         min_main_cluster_size=min_main_cluster_size
     )

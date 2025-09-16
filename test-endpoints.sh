@@ -75,9 +75,9 @@ test_endpoint "Unit Query API" "$BASE_URL/api-query" "POST" '{"query": "TFTQuery
 
 test_endpoint "Participants Query API" "$BASE_URL/api-query" "POST" '{"query": "TFTQuery().add_unit(\"Jinx\").get_participants()[:3]"}'
 
-test_endpoint "Cluster Details API" "$BASE_URL/api-cluster-details?id=0" "GET"
+test_endpoint "Cluster Details API" "$BASE_URL/api-cluster-details?id=1" "GET"
 
-test_endpoint "Cluster Details API (different ID)" "$BASE_URL/api-cluster-details?id=1" "GET"
+test_endpoint "Cluster Details API (different ID)" "$BASE_URL/api-cluster-details?id=4" "GET"
 
 echo "🏁 Testing complete!"
 echo ""

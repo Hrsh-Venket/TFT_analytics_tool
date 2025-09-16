@@ -33,7 +33,7 @@ def get_clusters(request):
 
         # Check if clusters table exists, if not return empty list
         try:
-            clusters_table = f"{importer.project_id}.{importer.dataset_id}.main_clusters"
+            clusters_table = importer.main_clusters_table
 
             # Query main clusters with metadata
             clusters_query = f"""
