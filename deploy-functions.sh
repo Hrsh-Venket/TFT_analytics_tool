@@ -32,7 +32,8 @@ gcloud functions deploy api-stats \
     --memory=512MB \
     --timeout=30s \
     --max-instances=10 \
-    --no-gen2
+    --no-gen2 \
+    --entry-point=get_stats
 
 echo "✅ api-stats deployed"
 
@@ -47,7 +48,8 @@ gcloud functions deploy api-clusters \
     --memory=1GB \
     --timeout=60s \
     --max-instances=10 \
-    --no-gen2
+    --no-gen2 \
+    --entry-point=get_clusters
 
 echo "✅ api-clusters deployed"
 
@@ -62,7 +64,8 @@ gcloud functions deploy api-query \
     --memory=1GB \
     --timeout=60s \
     --max-instances=10 \
-    --no-gen2
+    --no-gen2 \
+    --entry-point=execute_query
 
 echo "✅ api-query deployed"
 
@@ -77,7 +80,8 @@ gcloud functions deploy api-cluster-details \
     --memory=512MB \
     --timeout=30s \
     --max-instances=5 \
-    --no-gen2
+    --no-gen2 \
+    --entry-point=cluster_details
 
 echo "✅ api-cluster-details deployed"
 
