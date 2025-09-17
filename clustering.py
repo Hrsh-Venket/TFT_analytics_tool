@@ -48,7 +48,9 @@ except ImportError:
     NotFound = Exception  # Fallback for test mode
 
 # Test Mode Configuration
-TEST_MODE = os.getenv('TFT_TEST_MODE', 'false').lower() == 'true'
+TEST_MODE_ENV = os.getenv('TFT_TEST_MODE', 'false')
+TEST_MODE = TEST_MODE_ENV.lower() == 'true'
+print(f"🔍 Environment Debug: TFT_TEST_MODE='{TEST_MODE_ENV}', TEST_MODE={TEST_MODE}, HAS_BIGQUERY={HAS_BIGQUERY}")
 
 # Clustering Configuration
 CARRY_FREQUENCY_THRESHOLD = 0.75  # Minimum frequency for carries to be shown in main cluster names
