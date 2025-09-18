@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TFT Analytics Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'tft-gold': '#C89B3C',
+                        'tft-blue': '#0F1419',
+                        'tft-dark': '#1E2328',
+                        'tft-gray': '#3C3C41',
+                        'tft-light': '#F0E6D2'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1E2328 0%, #0F1419 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .tft-card {
+            background: rgba(60, 60, 65, 0.9);
+            border: 1px solid rgba(200, 155, 60, 0.3);
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+
+        .tft-button {
+            background: linear-gradient(135deg, #C89B3C 0%, #B8860B 100%);
+            transition: all 0.3s ease;
+        }
+
+        .tft-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(200, 155, 60, 0.4);
+        }
+
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        .cluster-item:hover {
+            background: rgba(200, 155, 60, 0.1);
+            transform: translateX(4px);
+        }
+
+        .query-example {
+            background: rgba(15, 20, 25, 0.8);
+            border-left: 3px solid #C89B3C;
+        }
+    </style>
+</head>
+<body class="text-tft-light min-h-screen">
+    <!-- Header -->
+    <div class="bg-tft-dark border-b border-tft-gold/20 sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <h1 class="text-3xl font-bold text-tft-gold">TFT Analytics</h1>
+                    <div class="text-sm text-tft-light/60"
+                         hx-get="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-stats"
+                         hx-trigger="load"
+                         hx-target="this"
+                         hx-swap="innerHTML">
+                        Loading stats...
+                    </div>
+                </div>
+                <div class="flex space-x-2">
+                    <button onclick="document.getElementById('query-section').scrollIntoView({behavior: 'smooth'})"
+                            class="tft-button px-4 py-2 rounded font-medium text-tft-dark">
+                        Query Builder
+                    </button>
+                    <button onclick="document.getElementById('clusters-section').scrollIntoView({behavior: 'smooth'})"
+                            class="tft-button px-4 py-2 rounded font-medium text-tft-dark">
+                        Clusters
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mx-auto px-4 py-8 space-y-8">
+        <!-- Quick Stats Overview -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div class="tft-card p-6 text-center">
+                <div class="text-2xl font-bold text-tft-gold" id="total-matches">-</div>
+                <div class="text-sm text-tft-light/80">Total Matches</div>
+            </div>
+            <div class="tft-card p-6 text-center">
+                <div class="text-2xl font-bold text-tft-gold" id="total-participants">-</div>
+                <div class="text-sm text-tft-light/80">Participants</div>
+            </div>
+            <div class="tft-card p-6 text-center">
+                <div class="text-2xl font-bold text-tft-gold" id="avg-placement">-</div>
+                <div class="text-sm text-tft-light/80">Avg Placement</div>
+            </div>
+            <div class="tft-card p-6 text-center">
+                <div class="text-2xl font-bold text-tft-gold" id="cluster-coverage">-</div>
+                <div class="text-sm text-tft-light/80">Cluster Coverage</div>
+            </div>
+        </div>
+
+        <!-- TFT Query Builder -->
+        <div id="query-section" class="tft-card p-6">
+            <h2 class="text-2xl font-bold text-tft-gold mb-6">TFT Query Builder</h2>
+
+            <!-- Query Examples -->
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3">Quick Examples</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="query-example p-3 rounded cursor-pointer"
+                         onclick="document.getElementById('query-input').value = this.getAttribute('data-query')"
+                         data-query='TFTQuery().get_stats()'>
+                        <div class="font-medium">Global Stats</div>
+                        <div class="text-sm text-tft-light/60">Overall database statistics</div>
+                    </div>
+                    <div class="query-example p-3 rounded cursor-pointer"
+                         onclick="document.getElementById('query-input').value = this.getAttribute('data-query')"
+                         data-query='TFTQuery().add_unit("Jinx").get_stats()'>
+                        <div class="font-medium">Jinx Compositions</div>
+                        <div class="text-sm text-tft-light/60">All comps featuring Jinx</div>
+                    </div>
+                    <div class="query-example p-3 rounded cursor-pointer"
+                         onclick="document.getElementById('query-input').value = this.getAttribute('data-query')"
+                         data-query='TFTQuery().add_trait("Sniper").add_unit("Aphelios").get_stats()'>
+                        <div class="font-medium">Sniper Aphelios</div>
+                        <div class="text-sm text-tft-light/60">Sniper trait with Aphelios</div>
+                    </div>
+                    <div class="query-example p-3 rounded cursor-pointer"
+                         onclick="document.getElementById('query-input').value = this.getAttribute('data-query')"
+                         data-query='TFTQuery().add_unit("Jinx").get_participants()'>
+                        <div class="font-medium">Detailed Jinx Data</div>
+                        <div class="text-sm text-tft-light/60">Full composition details</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Query Interface -->
+            <form hx-post="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-query"
+                  hx-target="#query-results"
+                  hx-swap="innerHTML"
+                  hx-indicator="#query-loading"
+                  class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-2">TFT Query</label>
+                    <textarea id="query-input"
+                              name="query"
+                              rows="3"
+                              class="w-full bg-tft-dark border border-tft-gray rounded px-3 py-2 text-tft-light focus:outline-none focus:border-tft-gold"
+                              placeholder='TFTQuery().add_unit("Jinx").get_stats()'></textarea>
+                </div>
+                <button type="submit"
+                        class="tft-button px-6 py-3 rounded font-medium text-tft-dark flex items-center space-x-2">
+                    <span>Execute Query</span>
+                    <div id="query-loading" class="htmx-indicator loading">
+                        <div class="w-4 h-4 border-2 border-tft-dark border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </button>
+            </form>
+
+            <!-- Query Results -->
+            <div id="query-results" class="mt-6 min-h-[100px]">
+                <div class="text-center text-tft-light/60 py-8">
+                    Execute a query to see results here
+                </div>
+            </div>
+        </div>
+
+        <!-- Clusters Section -->
+        <div id="clusters-section" class="tft-card p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-tft-gold">Meta Clusters</h2>
+                <button hx-get="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-clusters"
+                        hx-target="#clusters-grid"
+                        hx-swap="innerHTML"
+                        hx-indicator="#clusters-loading"
+                        class="tft-button px-4 py-2 rounded text-sm font-medium text-tft-dark">
+                    <span>Refresh</span>
+                    <div id="clusters-loading" class="htmx-indicator loading inline-block ml-2">
+                        <div class="w-3 h-3 border-2 border-tft-dark border-t-transparent rounded-full animate-spin"></div>
+                    </div>
+                </button>
+            </div>
+
+            <!-- Clusters Grid -->
+            <div id="clusters-grid"
+                 hx-get="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-clusters"
+                 hx-trigger="load"
+                 hx-target="this"
+                 hx-swap="innerHTML"
+                 class="loading">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="animate-pulse bg-tft-gray/50 h-32 rounded"></div>
+                    <div class="animate-pulse bg-tft-gray/50 h-32 rounded"></div>
+                    <div class="animate-pulse bg-tft-gray/50 h-32 rounded"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Cluster Details Modal Area -->
+        <div id="cluster-details" class="hidden"></div>
+    </div>
+
+    <script>
+        // Handle API stats parsing
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            if (evt.target.getAttribute('hx-get')?.includes('api-stats')) {
+                try {
+                    const data = JSON.parse(evt.target.textContent);
+                    if (data.total_matches) {
+                        document.getElementById('total-matches').textContent = data.total_matches.toLocaleString();
+                        document.getElementById('total-participants').textContent = data.total_participants.toLocaleString();
+                        document.getElementById('avg-placement').textContent = data.average_placement.toFixed(1);
+
+                        // Update header stats display
+                        evt.target.innerHTML = `${data.total_participants.toLocaleString()} participants • ${data.total_matches.toLocaleString()} matches • Avg level ${data.average_level.toFixed(1)}`;
+                    }
+                } catch (e) {
+                    console.log('Stats parsing error:', e);
+                }
+            }
+
+            if (evt.target.getAttribute('hx-get')?.includes('api-clusters')) {
+                try {
+                    const data = JSON.parse(evt.target.textContent);
+                    if (data.clusters) {
+                        renderClusters(data.clusters);
+                        // Update cluster coverage
+                        const coverage = ((data.clusters.reduce((sum, c) => sum + c.composition_count, 0) / parseInt(document.getElementById('total-participants').textContent.replace(/,/g, '') || 1)) * 100);
+                        document.getElementById('cluster-coverage').textContent = coverage.toFixed(1) + '%';
+                    }
+                } catch (e) {
+                    console.log('Clusters parsing error:', e);
+                }
+            }
+        });
+
+        function renderClusters(clusters) {
+            const grid = document.getElementById('clusters-grid');
+            grid.innerHTML = clusters.map(cluster => `
+                <div class="cluster-item bg-tft-gray/30 border border-tft-gray rounded-lg p-4 cursor-pointer transition-all duration-200"
+                     onclick="loadClusterDetails(${cluster.cluster_id})">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="font-semibold text-tft-gold">${cluster.carries.join(' + ')}</div>
+                        <div class="text-xs text-tft-light/60">${cluster.composition_count} comps</div>
+                    </div>
+                    <div class="text-sm text-tft-light/80 mb-3">
+                        ${cluster.sub_cluster_count} variations
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div class="text-center">
+                            <div class="font-medium text-tft-gold">${cluster.avg_placement.toFixed(1)}</div>
+                            <div class="text-tft-light/60">Avg Place</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="font-medium text-tft-gold">${cluster.top4_rate.toFixed(1)}%</div>
+                            <div class="text-tft-light/60">Top 4</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="font-medium text-tft-gold">${cluster.winrate.toFixed(1)}%</div>
+                            <div class="text-tft-light/60">Winrate</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function loadClusterDetails(clusterId) {
+            const detailsDiv = document.getElementById('cluster-details');
+            detailsDiv.className = 'tft-card p-6 mt-6';
+            detailsDiv.innerHTML = '<div class="text-center py-4 loading">Loading cluster details...</div>';
+
+            htmx.ajax('GET', `https://us-central1-tft-analytics-tool.cloudfunctions.net/api-cluster-details?id=${clusterId}`, {
+                target: '#cluster-details',
+                swap: 'innerHTML'
+            });
+        }
+
+        // Format query results
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            if (evt.target.id === 'query-results') {
+                try {
+                    const data = JSON.parse(evt.target.textContent);
+                    if (data.error) {
+                        evt.target.innerHTML = `<div class="bg-red-900/50 border border-red-500 rounded p-4 text-red-200">Error: ${data.error}</div>`;
+                    } else {
+                        evt.target.innerHTML = `<pre class="bg-tft-dark border border-tft-gray rounded p-4 text-sm overflow-auto max-h-96">${JSON.stringify(data, null, 2)}</pre>`;
+                    }
+                } catch (e) {
+                    // Keep raw response if not JSON
+                }
+            }
+
+            if (evt.target.id === 'cluster-details') {
+                try {
+                    const data = JSON.parse(evt.target.textContent);
+                    if (data.cluster_details) {
+                        renderClusterDetails(data.cluster_details);
+                    }
+                } catch (e) {
+                    console.log('Cluster details parsing error:', e);
+                }
+            }
+        });
+
+        function renderClusterDetails(details) {
+            const detailsDiv = document.getElementById('cluster-details');
+            detailsDiv.innerHTML = `
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <h3 class="text-xl font-bold text-tft-gold">${details.carries.join(' + ')}</h3>
+                        <p class="text-tft-light/60">${details.composition_count} compositions, ${details.sub_clusters.length} variations</p>
+                    </div>
+                    <button onclick="document.getElementById('cluster-details').className='hidden'"
+                            class="text-tft-light/60 hover:text-tft-light">✕</button>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-tft-gold">${details.avg_placement.toFixed(1)}</div>
+                        <div class="text-sm text-tft-light/60">Avg Placement</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-tft-gold">${details.top4_rate.toFixed(1)}%</div>
+                        <div class="text-sm text-tft-light/60">Top 4 Rate</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-tft-gold">${details.winrate.toFixed(1)}%</div>
+                        <div class="text-sm text-tft-light/60">Win Rate</div>
+                    </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-tft-gold">${details.avg_level.toFixed(1)}</div>
+                        <div class="text-sm text-tft-light/60">Avg Level</div>
+                    </div>
+                </div>
+
+                <h4 class="text-lg font-semibold text-tft-gold mb-4">Sub-Clusters (${details.sub_clusters.length})</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                    ${details.sub_clusters.map(sub => `
+                        <div class="bg-tft-dark/50 border border-tft-gray rounded p-3">
+                            <div class="font-medium text-sm">${sub.carries.join(', ')}</div>
+                            <div class="text-xs text-tft-light/60 mt-1">
+                                ${sub.composition_count} comps • ${sub.avg_placement.toFixed(1)} avg • ${sub.top4_rate.toFixed(1)}% top4
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
