@@ -12,7 +12,7 @@ def cors_headers(origin: str = '*') -> Dict[str, str]:
     return {
         'Access-Control-Allow-Origin': origin,
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, hx-current-url, hx-target, hx-trigger, hx-request',
         'Access-Control-Max-Age': '3600'
     }
 
