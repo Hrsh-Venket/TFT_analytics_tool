@@ -55,8 +55,8 @@ class TFTQuery:
         # OR logic
         versatile = TFTQuery().add_unit('Jinx').or_(TFTQuery().add_unit('Aphelios')).get_stats()
         
-        # Get detailed participants
-        participants = TFTQuery().add_unit('Jinx').get_participants()
+        # Get statistics for Jinx compositions
+        stats = TFTQuery().add_unit('Jinx').get_stats()
     """
     
     def __init__(self, project_id: Optional[str] = None, dataset_id: str = 'tft_analytics'):
@@ -166,24 +166,31 @@ class TFTQuery:
     def add_item_on_unit(self, unit_id: str, item_id: str) -> 'TFTQuery':
         """
         Add filter for specific item on specific unit.
-        
+
         Args:
             unit_id: Unit character ID
-            item_id: Item name (e.g., 'Infinity Edge', 'Guinsoo\'s Rageblade')
-            
+            item_id: Item name (e.g., 'Infinity_Edge', 'Guinsoos_Rageblade')
+
         Returns:
             Self for method chaining
         """
+        # Clean up item name - remove TFTItem prefix if present
+        clean_item_id = item_id.replace('TFTItem_', '').replace('TFT_Item_', '')
+
+        # Handle both exact matches and prefix matches
         condition = """
             EXISTS (
                 SELECT 1 FROM UNNEST(units) AS unit
                 CROSS JOIN UNNEST(unit.item_names) AS item
                 WHERE unit.character_id = @unit_id
-                AND item = @item_id
+                AND (item = @item_id
+                     OR item = CONCAT('TFTItem_', @item_id)
+                     OR item = CONCAT('TFT_Item_', @item_id)
+                     OR REGEXP_REPLACE(item, r'^TFT.*?Item_', '') = @item_id)
             )
         """
-        
-        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "item_id": item_id}))
+
+        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "item_id": clean_item_id}))
         return self
     
     def add_unit_item_count(self, unit_id: str, min_count: int = 0, max_count: int = 3) -> 'TFTQuery':
@@ -696,17 +703,6 @@ class TFTQuery:
             'top4_rate': round(top4_rate, 2)
         }
     
-    def get_participants(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Execute the query and return detailed participant data.
-        
-        Args:
-            limit: Optional limit on number of results
-            
-        Returns:
-            List of participant dictionaries
-        """
-        return self.execute(limit)
 
 # Compatibility aliases for existing code
 TFTQueryBigQuery = TFTQuery
@@ -834,8 +830,8 @@ def main():
     print("# Get Jinx statistics")
     print("stats = TFTQuery().add_unit('Jinx').get_stats()")
     print("")
-    print("# Get high-level Aphelios compositions") 
-    print("comps = TFTQuery().add_unit('Aphelios').add_player_level(min_level=8).get_participants(limit=50)")
+    print("# Get high-level Aphelios statistics")
+    print("stats = TFTQuery().add_unit('Aphelios').add_player_level(min_level=8).get_stats()")
     print("")
     print("# Complex logical query")
     print("versatile = TFTQuery().add_unit('Jinx').or_(TFTQuery().add_unit('Aphelios')).add_trait('Sniper', min_tier=2)")

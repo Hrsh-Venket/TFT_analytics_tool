@@ -153,7 +153,7 @@ def test_bigquery_querying():
         print("\nYou can now use queries like:")
         print("  from querying import TFTQuery")
         print("  stats = TFTQuery().add_unit('UnitName').get_stats()")
-        print("  participants = TFTQuery().add_trait('TraitName').get_participants()")
+        print("  stats = TFTQuery().add_trait('TraitName').get_stats()")
         
         return True
         
