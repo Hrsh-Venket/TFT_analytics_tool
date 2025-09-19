@@ -235,7 +235,7 @@
                     if (data.clusters) {
                         renderClusters(data.clusters);
                         // Update cluster coverage
-                        const coverage = ((data.clusters.reduce((sum, c) => sum + c.composition_count, 0) / parseInt(document.getElementById('total-participants').textContent.replace(/,/g, '') || 1)) * 100);
+                        const coverage = ((data.clusters.reduce((sum, c) => sum + c.size, 0) / parseInt(document.getElementById('total-participants').textContent.replace(/,/g, '') || 1)) * 100);
                         document.getElementById('cluster-coverage').textContent = coverage.toFixed(1) + '%';
                     }
                 } catch (e) {
@@ -248,13 +248,13 @@
             const grid = document.getElementById('clusters-grid');
             grid.innerHTML = clusters.map(cluster => `
                 <div class="cluster-item bg-tft-gray/30 border border-tft-gray rounded-lg p-4 cursor-pointer transition-all duration-200"
-                     onclick="loadClusterDetails(${cluster.cluster_id})">
+                     onclick="loadClusterDetails(${cluster.id})">
                     <div class="flex justify-between items-start mb-2">
                         <div class="font-semibold text-tft-gold">${cluster.carries.join(' + ')}</div>
-                        <div class="text-xs text-tft-light/60">${cluster.composition_count} comps</div>
+                        <div class="text-xs text-tft-light/60">${cluster.size} comps</div>
                     </div>
                     <div class="text-sm text-tft-light/80 mb-3">
-                        ${cluster.sub_cluster_count} variations
+                        Multiple variations
                     </div>
                     <div class="grid grid-cols-3 gap-2 text-xs">
                         <div class="text-center">
@@ -303,8 +303,8 @@
             if (evt.target.id === 'cluster-details') {
                 try {
                     const data = JSON.parse(evt.target.textContent);
-                    if (data.cluster_details) {
-                        renderClusterDetails(data.cluster_details);
+                    if (data.id) {
+                        renderClusterDetails(data);
                     }
                 } catch (e) {
                     console.log('Cluster details parsing error:', e);
@@ -318,13 +318,13 @@
                 <div class="flex justify-between items-start mb-6">
                     <div>
                         <h3 class="text-xl font-bold text-tft-gold">${details.carries.join(' + ')}</h3>
-                        <p class="text-tft-light/60">${details.composition_count} compositions, ${details.sub_clusters.length} variations</p>
+                        <p class="text-tft-light/60">${details.size} compositions, ${details.sub_clusters.length} variations</p>
                     </div>
                     <button onclick="document.getElementById('cluster-details').className='hidden'"
                             class="text-tft-light/60 hover:text-tft-light">✕</button>
                 </div>
 
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                     <div class="text-center">
                         <div class="text-2xl font-bold text-tft-gold">${details.avg_placement.toFixed(1)}</div>
                         <div class="text-sm text-tft-light/60">Avg Placement</div>
@@ -337,19 +337,15 @@
                         <div class="text-2xl font-bold text-tft-gold">${details.winrate.toFixed(1)}%</div>
                         <div class="text-sm text-tft-light/60">Win Rate</div>
                     </div>
-                    <div class="text-center">
-                        <div class="text-2xl font-bold text-tft-gold">${details.avg_level.toFixed(1)}</div>
-                        <div class="text-sm text-tft-light/60">Avg Level</div>
-                    </div>
                 </div>
 
                 <h4 class="text-lg font-semibold text-tft-gold mb-4">Sub-Clusters (${details.sub_clusters.length})</h4>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
                     ${details.sub_clusters.map(sub => `
                         <div class="bg-tft-dark/50 border border-tft-gray rounded p-3">
-                            <div class="font-medium text-sm">${sub.carries.join(', ')}</div>
+                            <div class="font-medium text-sm">${sub.carry_set.join(', ')}</div>
                             <div class="text-xs text-tft-light/60 mt-1">
-                                ${sub.composition_count} comps • ${sub.avg_placement.toFixed(1)} avg • ${sub.top4_rate.toFixed(1)}% top4
+                                ${sub.size} comps • ${sub.avg_placement.toFixed(1)} avg • ${sub.top4_rate.toFixed(1)}% top4
                             </div>
                         </div>
                     `).join('')}
