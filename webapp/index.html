@@ -137,9 +137,9 @@
                     </div>
                     <div class="query-example p-3 rounded cursor-pointer"
                          onclick="document.getElementById('query-input').value = this.getAttribute('data-query')"
-                         data-query='TFTQuery().add_unit("Jinx").get_participants()'>
-                        <div class="font-medium">Detailed Jinx Data</div>
-                        <div class="text-sm text-tft-light/60">Full composition details</div>
+                         data-query='TFTQuery().add_item_on_unit("Jinx", "InfinityEdge").get_stats()'>
+                        <div class="font-medium">Jinx with Infinity Edge</div>
+                        <div class="text-sm text-tft-light/60">Jinx carries with IE</div>
                     </div>
                 </div>
             </div>
@@ -292,7 +292,23 @@
                     const data = JSON.parse(evt.target.textContent);
                     if (data.error) {
                         evt.target.innerHTML = `<div class="bg-red-900/50 border border-red-500 rounded p-4 text-red-200">Error: ${data.error}</div>`;
+                    } else if (data.formatted_output) {
+                        // Display the formatted table output
+                        const lines = data.formatted_output.split('\n');
+                        evt.target.innerHTML = `
+                            <div class="bg-tft-dark border border-tft-gray rounded p-4">
+                                <pre class="text-sm font-mono text-tft-light">${data.formatted_output}</pre>
+                            </div>
+                        `;
+                    } else if (data.message && !data.success) {
+                        // Handle "not found" messages
+                        evt.target.innerHTML = `
+                            <div class="bg-tft-gray/50 border border-tft-gray rounded p-4 text-tft-light/80">
+                                ${data.message}
+                            </div>
+                        `;
                     } else {
+                        // Fallback for other data formats
                         evt.target.innerHTML = `<pre class="bg-tft-dark border border-tft-gray rounded p-4 text-sm overflow-auto max-h-96">${JSON.stringify(data, null, 2)}</pre>`;
                     }
                 } catch (e) {
