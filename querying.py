@@ -169,24 +169,26 @@ class TFTQuery:
 
         Args:
             unit_id: Unit character ID
-            item_id: Item name (e.g., 'Infinity_Edge', 'Guinsoos_Rageblade')
+            item_id: Item name (e.g., 'InfinityEdge', 'GuinsoosRageblade')
 
         Returns:
             Self for method chaining
         """
-        # Clean up item name - remove TFTItem prefix if present
-        clean_item_id = item_id.replace('TFTItem_', '').replace('TFT_Item_', '')
+        # Clean up item name - remove any TFT prefix if present
+        clean_item_id = item_id.replace('TFT_Item_', '').replace('TFTItem_', '').replace('TFT_', '')
 
         # Handle both exact matches and prefix matches
+        # The actual format in database is TFT_Item_InfinityEdge
         condition = """
             EXISTS (
                 SELECT 1 FROM UNNEST(units) AS unit
                 CROSS JOIN UNNEST(unit.item_names) AS item
                 WHERE unit.character_id = @unit_id
                 AND (item = @item_id
-                     OR item = CONCAT('TFTItem_', @item_id)
                      OR item = CONCAT('TFT_Item_', @item_id)
-                     OR REGEXP_REPLACE(item, r'^TFT.*?Item_', '') = @item_id)
+                     OR item = CONCAT('TFT_', @item_id)
+                     OR item = CONCAT('TFTItem_', @item_id)
+                     OR REGEXP_REPLACE(item, r'^TFT[0-9]*_Item_', '') = @item_id)
             )
         """
 
