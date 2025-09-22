@@ -61,13 +61,13 @@
 </head>
 <body class="text-tft-light min-h-screen">
     <!-- Header -->
-    <div class="bg-tft-dark border-b border-tft-gold/20 sticky top-0 z-50">
+    <!-- <div class="bg-tft-dark border-b border-tft-gold/20 sticky top-0 z-50">
         <div class="container mx-auto px-4 py-4">
             <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-4">
                     <h1 class="text-3xl font-bold text-tft-gold">TFT Analytics</h1>
                     <div class="text-sm text-tft-light/60"
-                         hx-get="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-stats"
+                         hx-get="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-stats" # remove header
                          hx-trigger="load"
                          hx-target="this"
                          hx-swap="innerHTML">
@@ -86,11 +86,11 @@
                 </div>
             </div>
         </div>
-    </div>
+    </div> -->
 
     <div class="container mx-auto px-4 py-8 space-y-8">
         <!-- Quick Stats Overview -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <!-- <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div class="tft-card p-6 text-center">
                 <div class="text-2xl font-bold text-tft-gold" id="total-matches">-</div>
                 <div class="text-sm text-tft-light/80">Total Matches</div>
@@ -107,14 +107,14 @@
                 <div class="text-2xl font-bold text-tft-gold" id="cluster-coverage">-</div>
                 <div class="text-sm text-tft-light/80">Cluster Coverage</div>
             </div>
-        </div>
+        </div> -->
 
         <!-- TFT Query Builder -->
         <div id="query-section" class="tft-card p-6">
             <h2 class="text-2xl font-bold text-tft-gold mb-6">TFT Query Builder</h2>
 
             <!-- Query Examples -->
-            <div class="mb-6">
+            <!-- <div class="mb-6">
                 <h3 class="text-lg font-semibold mb-3">Quick Examples</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="query-example p-3 rounded cursor-pointer"
@@ -142,7 +142,7 @@
                         <div class="text-sm text-tft-light/60">Jinx carries with IE</div>
                     </div>
                 </div>
-            </div>
+            </div> -->
 
             <!-- Query Interface -->
             <form hx-post="https://us-central1-tft-analytics-tool.cloudfunctions.net/api-query"
