@@ -358,6 +358,61 @@ try:
     if infinity_variations:
         print(f"Infinity Edge is stored as: {infinity_variations[0]}")
 
+    # Test name mapping functionality
+    print("\n" + "=" * 60)
+    print("TESTING NAME MAPPING FUNCTIONALITY")
+    print("=" * 60)
+    
+    try:
+        from name_mapper import TFTNameMapper, map_match_data
+        
+        # Test the name mapper directly
+        mapper = TFTNameMapper()
+        
+        print(f"Mapper loaded with {len(mapper.items_mapping)} item mappings")
+        
+        # Test specific mapping
+        test_item = "TFT_Item_InfinityEdge"
+        mapped_item = mapper.map_item_name(test_item)
+        print(f"Direct mapping test: '{test_item}' -> '{mapped_item}'")
+        
+        # Check if this specific mapping exists
+        if test_item in mapper.items_mapping:
+            print(f"✓ Mapping exists: {test_item} -> {mapper.items_mapping[test_item]}")
+        else:
+            print(f"✗ No mapping found for {test_item}")
+            print("Available mappings (first 10):")
+            for i, (key, value) in enumerate(list(mapper.items_mapping.items())[:10]):
+                print(f"  {key} -> {value}")
+        
+        # Test a complete unit data structure
+        print("\nTesting unit data mapping...")
+        test_unit = {
+            'character_id': 'TFT14_Jinx',
+            'itemNames': ['TFT_Item_InfinityEdge', 'TFT_Item_LastWhisper'],
+            'tier': 3
+        }
+        
+        mapped_unit = mapper.map_unit_data(test_unit)
+        print(f"Original unit: {test_unit}")
+        print(f"Mapped unit: {mapped_unit}")
+        
+        # Test with item_names field (snake_case)
+        test_unit_snake = {
+            'character_id': 'TFT14_Jinx',
+            'item_names': ['TFT_Item_InfinityEdge', 'TFT_Item_LastWhisper'],
+            'tier': 3
+        }
+        
+        mapped_unit_snake = mapper.map_unit_data(test_unit_snake)
+        print(f"Original unit (snake_case): {test_unit_snake}")
+        print(f"Mapped unit (snake_case): {mapped_unit_snake}")
+        
+    except Exception as mapper_error:
+        print(f"Name mapping test failed: {mapper_error}")
+        import traceback
+        traceback.print_exc()
+
 except Exception as e:
     print(f"ERROR: {e}")
     import traceback
