@@ -232,6 +232,120 @@ try:
     for row in result6:
         print(f"  Regex-based search found {row.count} Jinx units with Infinity Edge")
 
+    # Query 7: Test if underscore vs no underscore is the issue
+    print("\n7. Testing underscore variations...")
+    print("-" * 40)
+    
+    underscore_tests = [
+        "Infinity_Edge",
+        "InfinityEdge", 
+        "TFT_Item_Infinity_Edge",
+        "TFT_Item_InfinityEdge",
+        "TFT15_Item_InfinityEdge"
+    ]
+    
+    for test_item in underscore_tests:
+        query7 = f'''
+        SELECT COUNT(*) as count
+        FROM `tft-analytics-tool.tft_analytics.match_participants`,
+        UNNEST(units) AS unit,
+        UNNEST(unit.item_names) AS item
+        WHERE unit.character_id = 'Jinx'
+        AND item = '{test_item}'
+        '''
+        
+        result7 = client.query(query7)
+        for row in result7:
+            print(f"  '{test_item}': {row.count} matches")
+
+    # Query 8: Test TFTQuery logic step by step
+    print("\n8. Testing current TFTQuery logic step by step...")
+    print("-" * 40)
+    
+    # Simulate the exact logic from querying.py
+    user_input = "Infinity_Edge"
+    clean_item_id = user_input.replace('TFT_Item_', '').replace('TFTItem_', '').replace('TFT_', '')
+    print(f"User input: '{user_input}' -> Clean ID: '{clean_item_id}'")
+    
+    # Test each condition individually
+    test_conditions = [
+        ("Direct match", clean_item_id),
+        ("TFT_Item_ prefix", f"TFT_Item_{clean_item_id}"),
+        ("TFT_ prefix", f"TFT_{clean_item_id}"),
+        ("TFTItem_ prefix", f"TFTItem_{clean_item_id}")
+    ]
+    
+    for desc, test_val in test_conditions:
+        query8 = f'''
+        SELECT COUNT(*) as count
+        FROM `tft-analytics-tool.tft_analytics.match_participants`,
+        UNNEST(units) AS unit,
+        UNNEST(unit.item_names) AS item
+        WHERE unit.character_id = 'Jinx'
+        AND item = '{test_val}'
+        '''
+        
+        result8 = client.query(query8)
+        for row in result8:
+            print(f"  {desc} ('{test_val}'): {row.count}")
+
+    # Query 9: Test current regex logic
+    print("\n9. Testing current regex logic...")
+    print("-" * 40)
+    
+    query9 = f'''
+    SELECT COUNT(*) as count
+    FROM `tft-analytics-tool.tft_analytics.match_participants`,
+    UNNEST(units) AS unit,
+    UNNEST(unit.item_names) AS item
+    WHERE unit.character_id = 'Jinx'
+    AND REGEXP_REPLACE(item, r'^TFT[0-9]*_Item_', '') = '{clean_item_id}'
+    '''
+    
+    result9 = client.query(query9)
+    for row in result9:
+        print(f"  Regex strip ('{clean_item_id}'): {row.count}")
+
+    # Query 10: Show actual items that would match our regex
+    print("\n10. Items that match our regex pattern...")
+    print("-" * 40)
+    
+    query10 = f'''
+    SELECT DISTINCT item, REGEXP_REPLACE(item, r'^TFT[0-9]*_Item_', '') as stripped
+    FROM `tft-analytics-tool.tft_analytics.match_participants`,
+    UNNEST(units) AS unit,
+    UNNEST(unit.item_names) AS item
+    WHERE unit.character_id = 'Jinx'
+    AND REGEXP_REPLACE(item, r'^TFT[0-9]*_Item_', '') = '{clean_item_id}'
+    LIMIT 10
+    '''
+    
+    result10 = client.query(query10)
+    for row in result10:
+        print(f"  '{row.item}' -> stripped: '{row.stripped}'")
+
+    # Query 11: Find what the actual Infinity Edge item is called
+    print("\n11. Finding actual Infinity Edge variations...")
+    print("-" * 40)
+    
+    query11 = '''
+    SELECT DISTINCT item, COUNT(*) as count
+    FROM `tft-analytics-tool.tft_analytics.match_participants`,
+    UNNEST(units) AS unit,
+    UNNEST(unit.item_names) AS item
+    WHERE (
+        LOWER(item) LIKE '%infinity%'
+        OR LOWER(item) LIKE '%edge%'
+    )
+    GROUP BY item
+    ORDER BY count DESC
+    LIMIT 10
+    '''
+    
+    result11 = client.query(query11)
+    for row in result11:
+        print(f"  '{row.item}': {row.count} occurrences")
+
     print()
     print("=" * 60)
     print("DEBUGGING COMPLETE")
