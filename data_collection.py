@@ -3,39 +3,30 @@ TFT Data Collection Module
 
 This module handles all Riot Games API interactions for collecting TFT match data.
 Includes rate limiting, player lookup, match history, and bulk data collection.
+
+Usage:
+    python data_collection.py --api-key YOUR_API_KEY [OPTIONS]
+
+Examples:
+    # Basic collection with API key
+    python data_collection.py --api-key RGAPI-xxxxx
+
+    # Collection with custom settings
+    python data_collection.py --api-key RGAPI-xxxxx --days 30 --tier MASTER
+
+    # Test mode
+    python data_collection.py --test-mode
+
+    # Initialize tracker only
+    python data_collection.py --init-tracker
 """
-
-# ===============================
-# CONFIGURATION - EDIT THESE VALUES
-# ===============================
-
-API_KEY = "RGAPI-8f1ac1aa-6036-464e-b5eb-fe230efe8782"  # Replace with your actual Riot API key
-days = 45
-START_TIMESTAMP = (130032000 + (days * 86400))  # Epoch timestamp for period-based collection
-# 0 is June 16th, 2021, counts seconds from them 
-# 130002000 is July 30th 2025
-
-INIT_TRACKER_ONLY = False      # Set to True to only initialize tracker
-TEST_MODE = False               # Set to True to test with structure.json instead of API calls
-
-# Collection settings
-TIER = 'CHALLENGER'            # Minimum tier for data collection
-REGION_MATCHES = 'sea'         # Region for match data
-REGION_PLAYERS = 'sg2'         # Region for player rankings
-OUTPUT_FILE = 'matches.jsonl'  # Output file (for backward compatibility)
-BATCH_SIZE = 50                # Batch size for processing
-MAX_WORKERS = 5                # Maximum concurrent workers
-
-
-# ===============================
-# END CONFIGURATION
-# ===============================
 
 import requests
 import time
 import json
 import threading
 import os
+import argparse
 from datetime import datetime
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -962,44 +953,114 @@ def collect_match_data(api_key, tier='CHALLENGER', region_matches='sea', region_
     print("Ready for clustering and analysis!")
 
 
+def parse_arguments():
+    """Parse command-line arguments for data collection configuration."""
+    parser = argparse.ArgumentParser(
+        description='TFT Data Collection System - Collect match data from Riot Games API',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  Basic collection:
+    python data_collection.py --api-key RGAPI-xxxxx
+
+  Custom date range (last 30 days):
+    python data_collection.py --api-key RGAPI-xxxxx --days 30
+
+  Master tier and above:
+    python data_collection.py --api-key RGAPI-xxxxx --tier MASTER
+
+  Test mode:
+    python data_collection.py --test-mode
+
+  Initialize tracker:
+    python data_collection.py --init-tracker
+        '''
+    )
+
+    # API and authentication
+    parser.add_argument('--api-key', type=str, required=False,
+                        help='Riot Games API key (required for data collection)')
+
+    # Time range
+    parser.add_argument('--days', type=int, default=45,
+                        help='Number of days of match history to collect (default: 45)')
+
+    # Tier settings
+    parser.add_argument('--tier', type=str, default='CHALLENGER',
+                        choices=['CHALLENGER', 'GRANDMASTER', 'MASTER', 'DIAMOND', 'EMERALD', 'PLATINUM', 'GOLD', 'SILVER', 'BRONZE'],
+                        help='Minimum tier for data collection (default: CHALLENGER)')
+
+    # Region settings
+    parser.add_argument('--region-matches', type=str, default='sea',
+                        help='Region for match data (default: sea)')
+    parser.add_argument('--region-players', type=str, default='sg2',
+                        help='Region for player rankings (default: sg2)')
+
+    # Output settings
+    parser.add_argument('--output-file', type=str, default='matches.jsonl',
+                        help='Output JSONL file for match data (default: matches.jsonl)')
+
+    # Performance settings
+    parser.add_argument('--batch-size', type=int, default=50,
+                        help='Batch size for processing matches (default: 50)')
+    parser.add_argument('--max-workers', type=int, default=5,
+                        help='Maximum concurrent workers (default: 5)')
+
+    # Special modes
+    parser.add_argument('--test-mode', action='store_true',
+                        help='Test mode: use structure.json instead of API calls')
+    parser.add_argument('--init-tracker', action='store_true',
+                        help='Initialize global match tracker from existing data and exit')
+
+    args = parser.parse_args()
+
+    # Validate: API key required unless in special modes
+    if not args.test_mode and not args.init_tracker and not args.api_key:
+        parser.error('--api-key is required for data collection (unless using --test-mode or --init-tracker)')
+
+    return args
+
+
 if __name__ == "__main__":
+    # Parse command-line arguments
+    args = parse_arguments()
+
+    # Calculate start timestamp from days
+    START_TIMESTAMP = (130032000 + (args.days * 86400))
+
     print("TFT Data Collection System")
     print("=" * 50)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
-    
-    # Check API key
-    if API_KEY == "YOUR_API_KEY_HERE":
-        print("ERROR: Please set your API key in the API_KEY variable at the top of this file")
-        exit(1)
-    
 
     # Display current configuration
     print("Current Configuration:")
-    print(f"  API Key: {'*' * (len(API_KEY) - 4) + API_KEY[-4:]}")
-    print(f"  Tier: {TIER}")
-    print(f"  Regions: {REGION_PLAYERS} (players), {REGION_MATCHES} (matches)")
+    if args.api_key:
+        print(f"  API Key: {'*' * (len(args.api_key) - 4) + args.api_key[-4:]}")
+    print(f"  Tier: {args.tier}")
+    print(f"  Regions: {args.region_players} (players), {args.region_matches} (matches)")
     print(f"  Storage: {'BigQuery + JSONL' if BIGQUERY_AVAILABLE else 'JSONL only'}")
-    print(f"  Output file: {OUTPUT_FILE}")
-    print(f"  API batch size: {BATCH_SIZE}, Workers: {MAX_WORKERS}")
-    
-    if TEST_MODE:
+    print(f"  Output file: {args.output_file}")
+    print(f"  API batch size: {args.batch_size}, Workers: {args.max_workers}")
+
+    if args.test_mode:
         print(f"  Mode: TEST MODE - Using structure.json data")
-    elif INIT_TRACKER_ONLY:
+    elif args.init_tracker:
         print(f"  Mode: Initialize tracker only")
     else:
         readable_time = datetime.fromtimestamp(START_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')
         print(f"  Mode: Period-based collection from {readable_time}")
+        print(f"  Days: {args.days}")
     print()
-    
+
     # Special mode: Test BigQuery integration
-    if TEST_MODE:
+    if args.test_mode:
         print("🧪 TEST MODE: Testing BigQuery integration with structure.json...")
         test_bigquery_integration()
         exit(0)
-    
+
     # Special mode: Initialize global tracker
-    if INIT_TRACKER_ONLY:
+    if args.init_tracker:
         print("Initializing global match tracker from existing data...")
         matches_added = initialize_global_tracker_from_existing_data()
         if matches_added > 0:
@@ -1007,42 +1068,37 @@ if __name__ == "__main__":
         else:
             print("\nNo new matches added to tracker")
         exit(0)
-    
+
     # Run period-based collection
     print(f"Starting period-based collection from timestamp {START_TIMESTAMP}")
     readable_time = datetime.fromtimestamp(START_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')
     print(f"Start time: {readable_time}")
-    
-    # Use configured batch size
-    effective_batch_size = BATCH_SIZE
-    
+
     success = collect_period_match_data(
-        api_key=API_KEY,
+        api_key=args.api_key,
         start_timestamp=START_TIMESTAMP,
-        tier=TIER,
-        region_matches=REGION_MATCHES,
-        region_players=REGION_PLAYERS,
-        output_file=OUTPUT_FILE,
-        batch_size=effective_batch_size,
-        max_workers=MAX_WORKERS
+        tier=args.tier,
+        region_matches=args.region_matches,
+        region_players=args.region_players,
+        output_file=args.output_file,
+        batch_size=args.batch_size,
+        max_workers=args.max_workers
     )
-    
+
     print("\n" + "="*60)
     if success:
         print("DATA COLLECTION COMPLETE")
     else:
         print("DATA COLLECTION FAILED")
     print("="*60)
-    # Clean slate - ready for BigQuery statistics
-    
+
     print("Files generated:")
-    if os.path.exists(OUTPUT_FILE):
-        print(f"  - {OUTPUT_FILE}: Match data")
+    if os.path.exists(args.output_file):
+        print(f"  - {args.output_file}: Match data")
     if os.path.exists('global_matches_downloaded.json'):
         print("  - global_matches_downloaded.json: Global match tracking")
-    
+
     print("\nNext steps:")
     print("  - Run clustering: python clustering.py")
     print("  - Run querying: python querying.py")
-    print("  - Add BigQuery integration for cloud storage")
-    print("\nTo change settings, edit the configuration variables at the top of this file.")
+    print("  - Deploy functions: ./deploy-functions.sh")
