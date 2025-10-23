@@ -561,32 +561,40 @@ try:
     print("-" * 40)
 
     try:
+        import traceback
         from querying import TFTQuery
 
         query = TFTQuery()
         query.add_item_on_unit('Jinx', 'Infinity_Edge')
 
-        # Get the SQL
-        sql_parts = query.get_stats_query()
+        # Check the filter directly
+        if query._filters:
+            filter_obj = query._filters[0]
+            sql_condition = filter_obj.condition
 
-        # Check if query uses simple matching
-        if 'REGEXP_REPLACE' in sql_parts:
-            print("  ✗ FAIL: Query still uses REGEXP_REPLACE (should be simple match)")
-        else:
-            print("  ✓ PASS: Query does not use REGEXP_REPLACE")
+            print(f"Query condition: {sql_condition[:100]}...")
 
-        if 'CONCAT' in sql_parts:
-            print("  ✗ FAIL: Query still uses CONCAT (should be simple match)")
-        else:
-            print("  ✓ PASS: Query does not use CONCAT")
+            # Check if query uses simple matching
+            if 'REGEXP_REPLACE' in sql_condition:
+                print("  ✗ FAIL: Query still uses REGEXP_REPLACE (should be simple match)")
+            else:
+                print("  ✓ PASS: Query does not use REGEXP_REPLACE")
 
-        if 'item = @item_id' in sql_parts:
-            print("  ✓ PASS: Query uses simple string matching!")
+            if 'CONCAT' in sql_condition:
+                print("  ✗ FAIL: Query still uses CONCAT (should be simple match)")
+            else:
+                print("  ✓ PASS: Query does not use CONCAT")
+
+            if 'item = @item_id' in sql_condition:
+                print("  ✓ PASS: Query uses simple string matching!")
+            else:
+                print("  ? WARNING: Could not verify exact query structure")
         else:
-            print("  ? WARNING: Could not verify exact query structure")
+            print("  ✗ FAIL: No filters found in query")
 
     except Exception as e:
         print(f"  ✗ Query simplification test failed: {e}")
+        import traceback
         traceback.print_exc()
 
     print("\n" + "=" * 60)
