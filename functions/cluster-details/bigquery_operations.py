@@ -194,12 +194,14 @@ class BigQueryDataImporter:
                 # Convert units to BigQuery STRUCT format
                 units_struct = []
                 for unit in participant.get('units', []):
+                    # Use mapped item_names (already mapped by map_match_data above)
+                    # The name mapper converts itemNames -> item_names and applies mappings
                     units_struct.append({
                         'character_id': unit.get('character_id', ''),
                         'tier': unit.get('tier', None),
                         'rarity': unit.get('rarity', None),
                         'name': unit.get('name', ''),
-                        'item_names': unit.get('itemNames', [])
+                        'item_names': unit.get('item_names', [])  # Use mapped item_names, not raw itemNames
                     })
 
                 # Convert traits to BigQuery STRUCT format

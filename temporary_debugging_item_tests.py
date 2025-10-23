@@ -413,6 +413,186 @@ try:
         import traceback
         traceback.print_exc()
 
+    # ====================================================================
+    # NEW TESTS FOR ITEM MAPPING FIX VERIFICATION
+    # ====================================================================
+
+    print("\n" + "=" * 60)
+    print("TESTING ITEM MAPPING FIX")
+    print("=" * 60)
+
+    # Test 1: Unit data transformation
+    print("\n1. Testing unit data transformation...")
+    print("-" * 40)
+
+    try:
+        test_unit = {
+            'character_id': 'TFT15_Jinx',
+            'itemNames': ['TFT_Item_InfinityEdge', 'TFT_Item_LastWhisper', 'TFT_Item_Bloodthirster'],
+            'tier': 3,
+            'rarity': 4
+        }
+
+        print(f"Input unit: {test_unit}")
+        mapped_unit = mapper.map_unit_data(test_unit)
+        print(f"Output unit: {mapped_unit}")
+
+        # Check that itemNames was removed and item_names was added
+        if 'itemNames' in mapped_unit:
+            print("  ✗ FAIL: 'itemNames' field still exists (should be deleted)")
+        else:
+            print("  ✓ PASS: 'itemNames' field was removed")
+
+        if 'item_names' not in mapped_unit:
+            print("  ✗ FAIL: 'item_names' field not created")
+        else:
+            print(f"  ✓ PASS: 'item_names' field created with values: {mapped_unit['item_names']}")
+
+            # Check that items were mapped
+            expected_items = ['Infinity_Edge', 'Last_Whisper', 'Bloodthirster']
+            if mapped_unit['item_names'] == expected_items:
+                print(f"  ✓ PASS: Items correctly mapped!")
+            else:
+                print(f"  ✗ FAIL: Items not correctly mapped")
+                print(f"    Got: {mapped_unit['item_names']}")
+                print(f"    Expected: {expected_items}")
+
+    except Exception as e:
+        print(f"  ✗ Unit transformation test failed: {e}")
+        traceback.print_exc()
+
+    # Test 2: Complete match data mapping
+    print("\n2. Testing complete match data mapping...")
+    print("-" * 40)
+
+    try:
+        from name_mapper import map_match_data
+
+        test_match = {
+            'metadata': {'match_id': 'TEST_12345'},
+            'info': {
+                'game_datetime': 1234567890000,
+                'participants': [{
+                    'puuid': 'test-player-1',
+                    'placement': 1,
+                    'units': [
+                        {
+                            'character_id': 'TFT15_Jinx',
+                            'itemNames': ['TFT_Item_InfinityEdge', 'TFT_Item_LastWhisper'],
+                            'tier': 3
+                        }
+                    ],
+                    'traits': []
+                }]
+            }
+        }
+
+        mapped_match = map_match_data(test_match)
+        participant = mapped_match['info']['participants'][0]
+        unit = participant['units'][0]
+
+        print(f"Unit character_id: {unit['character_id']}")
+        print(f"Unit items: {unit.get('item_names', 'MISSING')}")
+
+        if 'itemNames' in unit:
+            print("  ✗ FAIL: 'itemNames' still exists in mapped match")
+        else:
+            print("  ✓ PASS: 'itemNames' removed from mapped match")
+
+        if 'item_names' in unit and unit['item_names'] == ['Infinity_Edge', 'Last_Whisper']:
+            print("  ✓ PASS: Match data correctly mapped!")
+        else:
+            print(f"  ✗ FAIL: Match data mapping incorrect")
+            print(f"    Got: {unit.get('item_names', 'MISSING')}")
+
+    except Exception as e:
+        print(f"  ✗ Match data mapping test failed: {e}")
+        traceback.print_exc()
+
+    # Test 3: BigQuery insert simulation
+    print("\n3. Testing BigQuery insert format...")
+    print("-" * 40)
+
+    try:
+        # Simulate what happens in bigquery_operations.py insert_match_data
+        test_match_bq = {
+            'metadata': {'match_id': 'TEST_12345'},
+            'info': {
+                'game_datetime': 1234567890000,
+                'participants': [{
+                    'puuid': 'test',
+                    'units': [{
+                        'character_id': 'TFT15_Jinx',
+                        'itemNames': ['TFT_Item_InfinityEdge'],
+                        'tier': 3,
+                        'rarity': 4
+                    }]
+                }]
+            }
+        }
+
+        # Apply mapping (as done in insert_match_data)
+        mapped_match_bq = map_match_data(test_match_bq)
+        participant = mapped_match_bq['info']['participants'][0]
+        unit = participant['units'][0]
+
+        # Simulate BigQuery insert structure
+        units_struct = {
+            'character_id': unit.get('character_id', ''),
+            'tier': unit.get('tier', None),
+            'rarity': unit.get('rarity', None),
+            'name': unit.get('name', ''),
+            'item_names': unit.get('item_names', [])  # Should use item_names, not itemNames
+        }
+
+        print(f"BigQuery struct item_names: {units_struct['item_names']}")
+
+        if units_struct['item_names'] == ['Infinity_Edge']:
+            print("  ✓ PASS: BigQuery will store clean mapped item names!")
+        else:
+            print(f"  ✗ FAIL: BigQuery struct has wrong item_names: {units_struct['item_names']}")
+
+    except Exception as e:
+        print(f"  ✗ BigQuery insert format test failed: {e}")
+        traceback.print_exc()
+
+    # Test 4: Query simplification
+    print("\n4. Testing query simplification...")
+    print("-" * 40)
+
+    try:
+        from querying import TFTQuery
+
+        query = TFTQuery()
+        query.add_item_on_unit('Jinx', 'Infinity_Edge')
+
+        # Get the SQL
+        sql_parts = query.get_stats_query()
+
+        # Check if query uses simple matching
+        if 'REGEXP_REPLACE' in sql_parts:
+            print("  ✗ FAIL: Query still uses REGEXP_REPLACE (should be simple match)")
+        else:
+            print("  ✓ PASS: Query does not use REGEXP_REPLACE")
+
+        if 'CONCAT' in sql_parts:
+            print("  ✗ FAIL: Query still uses CONCAT (should be simple match)")
+        else:
+            print("  ✓ PASS: Query does not use CONCAT")
+
+        if 'item = @item_id' in sql_parts:
+            print("  ✓ PASS: Query uses simple string matching!")
+        else:
+            print("  ? WARNING: Could not verify exact query structure")
+
+    except Exception as e:
+        print(f"  ✗ Query simplification test failed: {e}")
+        traceback.print_exc()
+
+    print("\n" + "=" * 60)
+    print("ITEM MAPPING FIX TESTS COMPLETE")
+    print("=" * 60)
+
 except Exception as e:
     print(f"ERROR: {e}")
     import traceback

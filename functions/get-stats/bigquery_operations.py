@@ -24,12 +24,9 @@ class BigQueryDataImporter:
         self.cluster_dataset_id = cluster_dataset_id
         self.project_id = project_id or self.client.project
 
-        # Table references for BigQuery operations (using actual table structure)
-        self.match_participants_table = f"{self.project_id}.{self.dataset_id}.match_participants"
-
-        # Legacy compatibility properties for existing code
-        self.matches_table = self.match_participants_table
-        self.participants_table = self.match_participants_table
+        # Table references for BigQuery operations (match data)
+        self.matches_table = f"{self.project_id}.{self.dataset_id}.matches"
+        self.participants_table = f"{self.project_id}.{self.dataset_id}.participants"
 
         # Cluster table references (separate dataset)
         self.main_clusters_table = f"{self.project_id}.{self.cluster_dataset_id}.main_clusters"
@@ -197,12 +194,14 @@ class BigQueryDataImporter:
                 # Convert units to BigQuery STRUCT format
                 units_struct = []
                 for unit in participant.get('units', []):
+                    # Use mapped item_names (already mapped by map_match_data above)
+                    # The name mapper converts itemNames -> item_names and applies mappings
                     units_struct.append({
                         'character_id': unit.get('character_id', ''),
                         'tier': unit.get('tier', None),
                         'rarity': unit.get('rarity', None),
                         'name': unit.get('name', ''),
-                        'item_names': unit.get('itemNames', [])
+                        'item_names': unit.get('item_names', [])  # Use mapped item_names, not raw itemNames
                     })
 
                 # Convert traits to BigQuery STRUCT format

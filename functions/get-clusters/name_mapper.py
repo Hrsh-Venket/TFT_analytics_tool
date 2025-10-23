@@ -179,12 +179,17 @@ class TFTNameMapper:
         if 'character_id' in mapped_unit:
             mapped_unit['character_id'] = self.map_unit_name(mapped_unit['character_id'])
         
-        # Map item names
+        # Map item names - handle both itemNames (API format) and item_names (snake_case)
+        # Always store in item_names field with mapped values
         if 'itemNames' in mapped_unit and isinstance(mapped_unit['itemNames'], list):
+            # Map items and store in item_names field
             mapped_unit['item_names'] = [
                 self.map_item_name(item) for item in mapped_unit['itemNames']
             ]
+            # Remove the camelCase field to avoid confusion
+            del mapped_unit['itemNames']
         elif 'item_names' in mapped_unit and isinstance(mapped_unit['item_names'], list):
+            # Already in snake_case format, just map the values
             mapped_unit['item_names'] = [
                 self.map_item_name(item) for item in mapped_unit['item_names']
             ]

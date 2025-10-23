@@ -169,30 +169,24 @@ class TFTQuery:
 
         Args:
             unit_id: Unit character ID
-            item_id: Item name (e.g., 'InfinityEdge', 'GuinsoosRageblade')
+            item_id: Item name (e.g., 'Infinity_Edge', 'Guinsoos_Rageblade')
+                    Items are stored as clean mapped names from items_mapping.csv
 
         Returns:
             Self for method chaining
         """
-        # Clean up item name - remove any TFT prefix if present
-        clean_item_id = item_id.replace('TFT_Item_', '').replace('TFTItem_', '').replace('TFT_', '')
-
-        # Handle both exact matches and prefix matches
-        # The actual format in database is TFT_Item_InfinityEdge
+        # Items are now stored as clean mapped names in BigQuery (e.g., 'Infinity_Edge')
+        # No need for complex regex - just direct string matching
         condition = """
             EXISTS (
                 SELECT 1 FROM UNNEST(units) AS unit
                 CROSS JOIN UNNEST(unit.item_names) AS item
                 WHERE unit.character_id = @unit_id
-                AND (item = @item_id
-                     OR item = CONCAT('TFT_Item_', @item_id)
-                     OR item = CONCAT('TFT_', @item_id)
-                     OR item = CONCAT('TFTItem_', @item_id)
-                     OR REGEXP_REPLACE(item, r'^TFT[0-9]*_Item_', '') = @item_id)
+                AND item = @item_id
             )
         """
 
-        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "item_id": clean_item_id}))
+        self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "item_id": item_id}))
         return self
     
     def add_unit_item_count(self, unit_id: str, min_count: int = 0, max_count: int = 3) -> 'TFTQuery':

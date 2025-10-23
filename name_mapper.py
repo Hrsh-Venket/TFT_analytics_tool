@@ -162,37 +162,42 @@ class TFTNameMapper:
     def map_unit_data(self, unit_data: Dict) -> Dict:
         """
         Apply mappings to a complete unit data structure.
-        
+
         Args:
             unit_data: Unit dictionary from API response
-            
+
         Returns:
             Unit dictionary with mapped names
         """
         if not isinstance(unit_data, dict):
             return unit_data
-        
+
         # Create a copy to avoid modifying original
         mapped_unit = unit_data.copy()
-        
+
         # Map character_id
         if 'character_id' in mapped_unit:
             mapped_unit['character_id'] = self.map_unit_name(mapped_unit['character_id'])
-        
-        # Map item names
+
+        # Map item names - handle both itemNames (API format) and item_names (snake_case)
+        # Always store in item_names field with mapped values
         if 'itemNames' in mapped_unit and isinstance(mapped_unit['itemNames'], list):
+            # Map items and store in item_names field
             mapped_unit['item_names'] = [
                 self.map_item_name(item) for item in mapped_unit['itemNames']
             ]
+            # Remove the camelCase field to avoid confusion
+            del mapped_unit['itemNames']
         elif 'item_names' in mapped_unit and isinstance(mapped_unit['item_names'], list):
+            # Already in snake_case format, just map the values
             mapped_unit['item_names'] = [
                 self.map_item_name(item) for item in mapped_unit['item_names']
             ]
-        
+
         # Map unit name if present
         if 'name' in mapped_unit:
             mapped_unit['name'] = self.map_unit_name(mapped_unit['name'])
-        
+
         return mapped_unit
     
     def map_trait_data(self, trait_data: Dict) -> Dict:
