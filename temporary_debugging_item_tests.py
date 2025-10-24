@@ -601,6 +601,204 @@ try:
     print("ITEM MAPPING FIX TESTS COMPLETE")
     print("=" * 60)
 
+    # ====================================================================
+    # BIGQUERY ITEM QUERYING TESTS (with new mapped data)
+    # ====================================================================
+
+    print("\n" + "=" * 60)
+    print("TESTING BIGQUERY ITEM QUERYING")
+    print("=" * 60)
+
+    # Test 5: Check actual item names in BigQuery
+    print("\n5. Checking actual item names in BigQuery database...")
+    print("-" * 40)
+
+    try:
+        query_items = '''
+        SELECT DISTINCT item, COUNT(*) as count
+        FROM `tft-analytics-tool.tft_analytics.match_participants`,
+        UNNEST(units) AS unit,
+        UNNEST(unit.item_names) AS item
+        WHERE item LIKE '%Infinity%' OR item LIKE '%Edge%'
+        GROUP BY item
+        ORDER BY count DESC
+        LIMIT 10
+        '''
+
+        result_items = client.query(query_items)
+        items_found = []
+
+        print("Items containing 'Infinity' or 'Edge' in database:")
+        for row in result_items:
+            items_found.append(row.item)
+            print(f"  {row.item}: {row.count} occurrences")
+
+        if not items_found:
+            print("  ⚠️  WARNING: No items found - database might be empty")
+        else:
+            # Check if items are mapped or unmapped
+            has_mapped = any('Infinity_Edge' in item and not item.startswith('TFT') for item in items_found)
+            has_unmapped = any('TFT_Item_InfinityEdge' in item for item in items_found)
+
+            if has_mapped and not has_unmapped:
+                print("  ✓ PASS: Database has MAPPED item names (e.g., 'Infinity_Edge')")
+            elif has_unmapped and not has_mapped:
+                print("  ✗ FAIL: Database has UNMAPPED item names (e.g., 'TFT_Item_InfinityEdge')")
+                print("    You need to re-collect data with the new mapping!")
+            elif has_mapped and has_unmapped:
+                print("  ⚠️  WARNING: Database has MIXED mapped and unmapped items")
+                print("    Recommend clearing and re-collecting all data")
+            else:
+                print("  ? Unknown item format")
+
+    except Exception as e:
+        print(f"  ✗ Database item check failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # Test 6: Test actual query execution with item filter
+    print("\n6. Testing query execution with item filter...")
+    print("-" * 40)
+
+    try:
+        from querying import TFTQuery
+
+        # Baseline query: Jinx without item filter
+        print("  Testing baseline (Jinx without item filter)...")
+        query_baseline = TFTQuery()
+        query_baseline.add_unit('Jinx')
+
+        result_baseline = query_baseline.get_stats()
+        baseline_count = result_baseline['play_count']
+        print(f"    Jinx (no item filter): {baseline_count} compositions")
+
+        # Filtered query: Jinx WITH Infinity_Edge
+        print("  Testing filtered (Jinx with Infinity_Edge)...")
+        query_filtered = TFTQuery()
+        query_filtered.add_unit('Jinx')
+        query_filtered.add_item_on_unit('Jinx', 'Infinity_Edge')
+
+        result_filtered = query_filtered.get_stats()
+        filtered_count = result_filtered['play_count']
+        print(f"    Jinx + Infinity_Edge: {filtered_count} compositions")
+
+        # Analyze results
+        print("\n  Analysis:")
+        print(f"    Baseline count: {baseline_count}")
+        print(f"    Filtered count: {filtered_count}")
+
+        if baseline_count == 0:
+            print("    ⚠️  WARNING: No Jinx compositions found in database")
+            print("    Database might be empty or Jinx not played")
+        elif filtered_count == baseline_count:
+            print("    ✗ FAIL: Filter has NO EFFECT (counts are equal)")
+            print("    This means item filtering is NOT working!")
+            print("    Likely cause: Database has unmapped items but query expects mapped items")
+        elif filtered_count > baseline_count:
+            print("    ✗ FAIL: Filtered count > baseline (impossible!)")
+            print("    Something is seriously wrong with the query")
+        elif filtered_count == 0:
+            print("    ⚠️  WARNING: Zero results with item filter")
+            print("    Either:")
+            print("      - No Jinx has Infinity Edge (unlikely)")
+            print("      - Item names don't match (database unmapped, query expects mapped)")
+        else:
+            reduction = baseline_count - filtered_count
+            percentage = (filtered_count / baseline_count * 100) if baseline_count > 0 else 0
+            print(f"    ✓ PASS: Filter is WORKING!")
+            print(f"    Filtered out: {reduction} compositions")
+            print(f"    Percentage with IE: {percentage:.1f}%")
+
+    except Exception as e:
+        print(f"  ✗ Query execution test failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # Test 7: Test with different items to verify consistency
+    print("\n7. Testing multiple item queries for consistency...")
+    print("-" * 40)
+
+    try:
+        from querying import TFTQuery
+
+        test_items = [
+            ('Jinx', 'Last_Whisper'),
+            ('Jinx', 'Bloodthirster'),
+            ('Jinx', 'Guinsoos_Rageblade')
+        ]
+
+        for unit, item in test_items:
+            query = TFTQuery()
+            query.add_unit(unit)
+            query.add_item_on_unit(unit, item)
+
+            try:
+                result = query.get_stats()
+                count = result['play_count']
+                print(f"  {unit} + {item}: {count} compositions")
+
+                if count > 0:
+                    print(f"    ✓ Query returned results")
+                else:
+                    print(f"    ⚠️  No results (might be rare or item name mismatch)")
+            except Exception as e:
+                print(f"  ✗ Query failed for {unit} + {item}: {e}")
+
+    except Exception as e:
+        print(f"  ✗ Multiple item test failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # Test 8: Verify query SQL is using simple matching
+    print("\n8. Verifying query SQL uses simple item matching...")
+    print("-" * 40)
+
+    try:
+        from querying import TFTQuery
+
+        query = TFTQuery()
+        query.add_unit('Jinx')
+        query.add_item_on_unit('Jinx', 'Infinity_Edge')
+
+        # Get the actual SQL that will be executed
+        sql_query = query._build_query()
+
+        print("  Checking SQL query structure...")
+
+        # Check for simple matching
+        if 'item = @item_id' in sql_query or 'item = @' in sql_query:
+            print("    ✓ PASS: Uses simple string matching")
+        else:
+            print("    ⚠️  WARNING: Could not verify simple matching in SQL")
+
+        # Check no complex operations
+        if 'REGEXP_REPLACE' not in sql_query:
+            print("    ✓ PASS: No REGEXP_REPLACE in query")
+        else:
+            print("    ✗ FAIL: Still using REGEXP_REPLACE")
+
+        if 'CONCAT' not in sql_query:
+            print("    ✓ PASS: No CONCAT in query")
+        else:
+            print("    ✗ FAIL: Still using CONCAT")
+
+        # Show part of the query for debugging
+        print(f"\n  Sample of generated SQL:")
+        lines = sql_query.split('\n')
+        for i, line in enumerate(lines[:15]):  # Show first 15 lines
+            print(f"    {line}")
+        if len(lines) > 15:
+            print(f"    ... ({len(lines) - 15} more lines)")
+
+    except Exception as e:
+        print(f"  ✗ SQL verification test failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+    print("\n" + "=" * 60)
+    print("BIGQUERY ITEM QUERYING TESTS COMPLETE")
+    print("=" * 60)
+
 except Exception as e:
     print(f"ERROR: {e}")
     import traceback
