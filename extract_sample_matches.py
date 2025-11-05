@@ -75,11 +75,11 @@ def extract_sample_matches(project_id: str = None, dataset_id: str = 'tft_analyt
         if row.units:
             for unit in row.units:
                 units.append({
-                    'character_id': unit.character_id,
-                    'name': unit.name,
-                    'tier': unit.tier,  # Star level (1, 2, or 3)
-                    'rarity': unit.rarity,  # Cost (1-5)
-                    'items': list(unit.item_names) if unit.item_names else []
+                    'character_id': unit['character_id'],
+                    'name': unit['name'],
+                    'tier': unit['tier'],  # Star level (1, 2, or 3)
+                    'rarity': unit['rarity'],  # Cost (1-5)
+                    'items': list(unit['item_names']) if unit.get('item_names') else []
                 })
 
         # Convert traits from STRUCT to dict
@@ -87,11 +87,11 @@ def extract_sample_matches(project_id: str = None, dataset_id: str = 'tft_analyt
         if row.traits:
             for trait in row.traits:
                 traits.append({
-                    'name': trait.name,
-                    'num_units': trait.num_units,
-                    'style': trait.style,  # 0=inactive, 1-4=bronze/silver/gold/chromatic
-                    'tier_current': trait.tier_current,
-                    'tier_total': trait.tier_total
+                    'name': trait['name'],
+                    'num_units': trait['num_units'],
+                    'style': trait['style'],  # 0=inactive, 1-4=bronze/silver/gold/chromatic
+                    'tier_current': trait['tier_current'],
+                    'tier_total': trait['tier_total']
                 })
 
         # Add participant data
