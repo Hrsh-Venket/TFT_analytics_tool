@@ -93,6 +93,61 @@ def process_matches_to_arrays(
     return X, Y, encoder
 
 
+def create_train_val_test_splits(X: np.ndarray, Y: np.ndarray,
+                                  train_ratio: float = 0.8,
+                                  val_ratio: float = 0.1,
+                                  test_ratio: float = 0.1,
+                                  shuffle: bool = True,
+                                  random_seed: int = 42):
+    """
+    Split data into train, validation, and test sets.
+
+    Args:
+        X: Features array
+        Y: Labels array
+        train_ratio: Ratio for training set (default: 0.8)
+        val_ratio: Ratio for validation set (default: 0.1)
+        test_ratio: Ratio for test set (default: 0.1)
+        shuffle: Whether to shuffle before splitting
+        random_seed: Random seed for reproducibility
+
+    Returns:
+        Tuple of (X_train, Y_train, X_val, Y_val, X_test, Y_test)
+    """
+    # Validate ratios
+    if not np.isclose(train_ratio + val_ratio + test_ratio, 1.0):
+        raise ValueError(f"Ratios must sum to 1.0, got {train_ratio + val_ratio + test_ratio}")
+
+    n_samples = len(X)
+    indices = np.arange(n_samples)
+
+    # Shuffle if requested
+    if shuffle:
+        np.random.seed(random_seed)
+        np.random.shuffle(indices)
+
+    # Calculate split points
+    train_end = int(n_samples * train_ratio)
+    val_end = train_end + int(n_samples * val_ratio)
+
+    # Split indices
+    train_idx = indices[:train_end]
+    val_idx = indices[train_end:val_end]
+    test_idx = indices[val_end:]
+
+    # Split data
+    X_train, Y_train = X[train_idx], Y[train_idx]
+    X_val, Y_val = X[val_idx], Y[val_idx]
+    X_test, Y_test = X[test_idx], Y[test_idx]
+
+    print(f"\n✓ Split data into train/val/test:")
+    print(f"  Train: {len(X_train)} samples ({len(X_train)/n_samples*100:.1f}%)")
+    print(f"  Val:   {len(X_val)} samples ({len(X_val)/n_samples*100:.1f}%)")
+    print(f"  Test:  {len(X_test)} samples ({len(X_test)/n_samples*100:.1f}%)")
+
+    return X_train, Y_train, X_val, Y_val, X_test, Y_test
+
+
 def save_to_hdf5(X: np.ndarray, Y: np.ndarray, output_file: str, metadata: dict = None):
     """
     Save X and Y arrays to HDF5 file.
@@ -118,6 +173,49 @@ def save_to_hdf5(X: np.ndarray, Y: np.ndarray, output_file: str, metadata: dict 
     print(f"✓ Saved to {output_file}")
     print(f"  X: {X.shape}, dtype: {X.dtype}")
     print(f"  Y: {Y.shape}, dtype: {Y.dtype}")
+
+
+def save_splits_to_hdf5(X_train, Y_train, X_val, Y_val, X_test, Y_test,
+                        output_file: str, metadata: dict = None):
+    """
+    Save train/val/test splits to a single HDF5 file.
+
+    Args:
+        X_train, Y_train: Training data
+        X_val, Y_val: Validation data
+        X_test, Y_test: Test data
+        output_file: Output HDF5 file path
+        metadata: Optional metadata dict to save
+    """
+    print(f"\nSaving splits to HDF5: {output_file}")
+
+    with h5py.File(output_file, 'w') as f:
+        # Create groups for each split
+        train_group = f.create_group('train')
+        val_group = f.create_group('val')
+        test_group = f.create_group('test')
+
+        # Save training data
+        train_group.create_dataset('X', data=X_train, compression='gzip', compression_opts=4)
+        train_group.create_dataset('Y', data=Y_train, compression='gzip', compression_opts=4)
+
+        # Save validation data
+        val_group.create_dataset('X', data=X_val, compression='gzip', compression_opts=4)
+        val_group.create_dataset('Y', data=Y_val, compression='gzip', compression_opts=4)
+
+        # Save test data
+        test_group.create_dataset('X', data=X_test, compression='gzip', compression_opts=4)
+        test_group.create_dataset('Y', data=Y_test, compression='gzip', compression_opts=4)
+
+        # Save metadata as attributes
+        if metadata:
+            for key, value in metadata.items():
+                f.attrs[key] = value
+
+    print(f"✓ Saved splits to {output_file}")
+    print(f"  Train: X{X_train.shape}, Y{Y_train.shape}")
+    print(f"  Val:   X{X_val.shape}, Y{Y_val.shape}")
+    print(f"  Test:  X{X_test.shape}, Y{Y_test.shape}")
 
 
 def load_from_hdf5(input_file: str):
@@ -150,6 +248,54 @@ def load_from_hdf5(input_file: str):
     print(f"  Y: {Y.shape}, dtype: {Y.dtype}")
 
     return X, Y, metadata
+
+
+def load_splits_from_hdf5(input_file: str):
+    """
+    Load train/val/test splits from HDF5 file.
+
+    Args:
+        input_file: Input HDF5 file path
+
+    Returns:
+        Tuple of (X_train, Y_train, X_val, Y_val, X_test, Y_test, metadata)
+
+    Usage with PyTorch:
+        X_train, Y_train, X_val, Y_val, X_test, Y_test, metadata = load_splits_from_hdf5('tft_splits.h5')
+
+        train_X = torch.from_numpy(X_train).float()
+        train_Y = torch.from_numpy(Y_train).long()
+
+        val_X = torch.from_numpy(X_val).float()
+        val_Y = torch.from_numpy(Y_val).long()
+
+        test_X = torch.from_numpy(X_test).float()
+        test_Y = torch.from_numpy(Y_test).long()
+    """
+    print(f"Loading splits from HDF5: {input_file}")
+
+    with h5py.File(input_file, 'r') as f:
+        # Load training data
+        X_train = f['train/X'][:]
+        Y_train = f['train/Y'][:]
+
+        # Load validation data
+        X_val = f['val/X'][:]
+        Y_val = f['val/Y'][:]
+
+        # Load test data
+        X_test = f['test/X'][:]
+        Y_test = f['test/Y'][:]
+
+        # Load metadata
+        metadata = dict(f.attrs)
+
+    print(f"✓ Loaded splits from {input_file}")
+    print(f"  Train: X{X_train.shape}, Y{Y_train.shape}")
+    print(f"  Val:   X{X_val.shape}, Y{Y_val.shape}")
+    print(f"  Test:  X{X_test.shape}, Y{Y_test.shape}")
+
+    return X_train, Y_train, X_val, Y_val, X_test, Y_test, metadata
 
 
 def main():
