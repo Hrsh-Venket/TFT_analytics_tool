@@ -338,9 +338,19 @@ def create_splits_from_hdf5(
                     end = min(start + chunk_size, len(split_idx))
                     batch_idx = split_idx[start:end]
 
-                    # Read from input file
-                    X_batch = f_in['X'][batch_idx]
-                    Y_batch = f_in['Y'][batch_idx]
+                    # HDF5 requires sorted indices for fancy indexing
+                    # Sort for reading, then restore original order for writing
+                    sort_order = np.argsort(batch_idx)
+                    sorted_batch_idx = batch_idx[sort_order]
+                    unsort_order = np.argsort(sort_order)
+
+                    # Read from input file with sorted indices
+                    X_batch = f_in['X'][sorted_batch_idx]
+                    Y_batch = f_in['Y'][sorted_batch_idx]
+
+                    # Restore original (shuffled) order before writing
+                    X_batch = X_batch[unsort_order]
+                    Y_batch = Y_batch[unsort_order]
 
                     # Write to output file
                     out_X[start:end] = X_batch
