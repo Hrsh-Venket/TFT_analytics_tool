@@ -355,7 +355,7 @@ def train_model(
 
         # Load best model
         best_model_path = os.path.join(config.MODEL_SAVE_DIR, 'best_model.pt')
-        checkpoint = torch.load(best_model_path, map_location=config.DEVICE)
+        checkpoint = torch.load(best_model_path, map_location=config.DEVICE, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
 
         # Evaluate on test set
