@@ -6,6 +6,7 @@ A deep learning model for predicting TFT match placements using multi-head self-
 
 from ml.model.config import Config
 from ml.model.architecture import TFTRankingModel, create_model
+from ml.model.loss import LambdaNDCGLoss, LambdaNDCGLoss2, ApproxNDCGLoss
 from ml.model.data_utils import (
     load_and_prepare_data,
     create_data_loaders,
@@ -25,6 +26,9 @@ __all__ = [
     'Config',
     'TFTRankingModel',
     'create_model',
+    'LambdaNDCGLoss',
+    'LambdaNDCGLoss2',
+    'ApproxNDCGLoss',
     'load_and_prepare_data',
     'create_data_loaders',
     'FeatureNormalizer',

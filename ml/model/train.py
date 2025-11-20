@@ -18,11 +18,7 @@ import numpy as np
 from typing import Dict
 from tqdm import tqdm
 
-try:
-    from pytorchltr.loss import LambdaNDCGLoss2
-except ImportError:
-    print("Warning: pytorchltr not installed. Install with: pip install pytorchltr")
-    raise
+from ml.model.loss import LambdaNDCGLoss2
 
 from ml.model.config import Config
 from ml.model.architecture import create_model

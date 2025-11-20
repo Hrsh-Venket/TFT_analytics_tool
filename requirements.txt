@@ -10,6 +10,6 @@ psutil>=5.9.0  # For memory monitoring in ML pipeline
 
 # ML Model Training Dependencies
 torch>=2.0.0  # PyTorch for deep learning
-pytorchltr>=0.2.0  # LambdaNDCG loss for ranking
 tensorboard>=2.14.0  # TensorBoard for training visualization
 tqdm>=4.65.0  # Progress bars for training
+# Note: LambdaNDCG loss implemented in ml/model/loss.py (no pytorchltr dependency)
