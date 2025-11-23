@@ -175,9 +175,14 @@ class TFTNameMapper:
         # Create a copy to avoid modifying original
         mapped_unit = unit_data.copy()
 
-        # Map character_id
+        # Map character_id and create name field
+        # The Riot API provides character_id (e.g., "TFT15_Jinx") but not a name field
+        # We need to create the name field from the mapped character_id for BigQuery
         if 'character_id' in mapped_unit:
-            mapped_unit['character_id'] = self.map_unit_name(mapped_unit['character_id'])
+            mapped_name = self.map_unit_name(mapped_unit['character_id'])
+            mapped_unit['name'] = mapped_name  # Create name field for BigQuery
+            # Keep character_id as the raw value for reference
+            # mapped_unit['character_id'] stays as original
 
         # Map item names - handle both itemNames (API format) and item_names (snake_case)
         # Always store in item_names field with mapped values
@@ -194,8 +199,8 @@ class TFTNameMapper:
                 self.map_item_name(item) for item in mapped_unit['item_names']
             ]
 
-        # Map unit name if present
-        if 'name' in mapped_unit:
+        # If name field already exists (shouldn't happen with Riot API), map it
+        elif 'name' in mapped_unit:
             mapped_unit['name'] = self.map_unit_name(mapped_unit['name'])
 
         return mapped_unit
