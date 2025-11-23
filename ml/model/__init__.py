@@ -10,7 +10,8 @@ from ml.model.loss import LambdaNDCGLoss, LambdaNDCGLoss2, ApproxNDCGLoss
 from ml.model.data_utils import (
     load_and_prepare_data,
     create_data_loaders,
-    FeatureNormalizer
+    FeatureNormalizer,
+    ShuffledPlayerDataset
 )
 from ml.model.metrics import (
     evaluate_model,
@@ -32,6 +33,7 @@ __all__ = [
     'load_and_prepare_data',
     'create_data_loaders',
     'FeatureNormalizer',
+    'ShuffledPlayerDataset',
     'evaluate_model',
     'print_metrics',
     'compute_ndcg',

@@ -34,6 +34,7 @@ class Config:
     # DATA PREPROCESSING
     # ============================================================================
     NORMALIZE_FEATURES = True        # Standardize input features
+    SHUFFLE_PLAYERS = True           # Shuffle player order within matches (prevents positional bias)
     NUM_WORKERS = 2                  # DataLoader workers (set to 0 for debugging)
 
     # ============================================================================
@@ -86,6 +87,7 @@ class Config:
 
         print("\n[DATA]")
         print(f"  Normalize Features: {cls.NORMALIZE_FEATURES}")
+        print(f"  Shuffle Players: {cls.SHUFFLE_PLAYERS}")
         print(f"  DataLoader Workers: {cls.NUM_WORKERS}")
 
         print("\n[SAVING]")

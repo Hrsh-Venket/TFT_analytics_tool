@@ -216,6 +216,7 @@ def train_model(
         test_Y=data['test_Y'],
         batch_size=config.BATCH_SIZE,
         num_workers=config.NUM_WORKERS,
+        shuffle_players=config.SHUFFLE_PLAYERS,
         verbose=verbose
     )
 

@@ -5,7 +5,7 @@ Handles data loading, normalization, and DataLoader creation.
 
 import torch
 import numpy as np
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import Dataset, TensorDataset, DataLoader
 from ml.pipeline import load_splits_from_hdf5
 from ml.model.config import Config
 
@@ -55,6 +55,54 @@ class FeatureNormalizer:
         """Fit and transform in one step."""
         self.fit(X)
         return self.transform(X)
+
+
+class ShuffledPlayerDataset(Dataset):
+    """
+    Dataset that shuffles player order within each match.
+
+    This prevents the model from learning positional biases
+    (e.g., player at position 0 is always 1st place).
+
+    Each time a match is accessed, the 8 players are randomly
+    permuted, with the same permutation applied to both features and labels.
+    """
+
+    def __init__(self, X: torch.Tensor, Y: torch.Tensor, shuffle: bool = True):
+        """
+        Initialize dataset.
+
+        Args:
+            X: Features tensor of shape (num_matches, 8, player_feature_dim)
+            Y: Labels tensor of shape (num_matches, 8)
+            shuffle: Whether to shuffle players (default: True)
+        """
+        self.X = X
+        self.Y = Y
+        self.shuffle = shuffle
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        """
+        Get a match with shuffled player order.
+
+        Returns:
+            Tuple of (features, labels) with same random permutation applied to both
+        """
+        x = self.X[idx]  # Shape: (8, player_feature_dim)
+        y = self.Y[idx]  # Shape: (8,)
+
+        if self.shuffle:
+            # Generate random permutation of players (0-7)
+            perm = torch.randperm(8)
+
+            # Apply same permutation to both features and labels
+            x = x[perm]  # Shuffle players
+            y = y[perm]  # Shuffle labels to match
+
+        return x, y
 
 
 def placement_to_relevance(Y: np.ndarray) -> np.ndarray:
@@ -236,6 +284,7 @@ def create_data_loaders(
     test_Y: torch.Tensor,
     batch_size: int = Config.BATCH_SIZE,
     num_workers: int = Config.NUM_WORKERS,
+    shuffle_players: bool = Config.SHUFFLE_PLAYERS,
     verbose: bool = True
 ):
     """
@@ -247,6 +296,7 @@ def create_data_loaders(
         test_X, test_Y: Test tensors
         batch_size: Batch size
         num_workers: Number of DataLoader workers
+        shuffle_players: Whether to shuffle player order within matches (default: True)
         verbose: Print information
 
     Returns:
@@ -256,11 +306,17 @@ def create_data_loaders(
         print("Creating DataLoaders...")
         print(f"  Batch size: {batch_size}")
         print(f"  Num workers: {num_workers}")
+        print(f"  Shuffle players: {shuffle_players}")
 
-    # Create datasets
-    train_dataset = TensorDataset(train_X, train_Y)
-    val_dataset = TensorDataset(val_X, val_Y)
-    test_dataset = TensorDataset(test_X, test_Y)
+    # Create datasets with player shuffling to prevent positional bias
+    # Training: shuffle players for data augmentation
+    train_dataset = ShuffledPlayerDataset(train_X, train_Y, shuffle=shuffle_players)
+
+    # Validation: also shuffle to match training conditions
+    val_dataset = ShuffledPlayerDataset(val_X, val_Y, shuffle=shuffle_players)
+
+    # Test: NO shuffling for consistent evaluation
+    test_dataset = ShuffledPlayerDataset(test_X, test_Y, shuffle=False)
 
     # Create data loaders
     train_loader = DataLoader(
