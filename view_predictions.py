@@ -45,42 +45,49 @@ def main():
     print("\nLoading model...")
     model = load_model(args.model, device=Config.DEVICE)
 
-    # Load data
+    # Load data (normalized for model)
     print("Loading data...")
-    data = load_and_prepare_data(args.data, normalize=True, verbose=False)
+    data_normalized = load_and_prepare_data(args.data, normalize=True, verbose=False)
 
-    # Select split
+    # Load data (original for decoder)
+    data_original = load_and_prepare_data(args.data, normalize=False, verbose=False)
+
+    # Select split (normalized for model)
     if args.split == 'train':
-        X, Y = data['train_X'], data['train_Y']
+        X_norm, Y = data_normalized['train_X'], data_normalized['train_Y']
+        X_orig = data_original['train_X']
     elif args.split == 'val':
-        X, Y = data['val_X'], data['val_Y']
+        X_norm, Y = data_normalized['val_X'], data_normalized['val_Y']
+        X_orig = data_original['val_X']
     else:
-        X, Y = data['test_X'], data['test_Y']
+        X_norm, Y = data_normalized['test_X'], data_normalized['test_Y']
+        X_orig = data_original['test_X']
 
     # Get sample matches
-    end_idx = min(args.start + args.num, len(X))
-    sample_X = X[args.start:end_idx]
+    end_idx = min(args.start + args.num, len(X_norm))
+    sample_X_norm = X_norm[args.start:end_idx]
+    sample_X_orig = X_orig[args.start:end_idx]
     sample_Y = Y[args.start:end_idx]
 
-    print(f"Loaded {len(sample_X)} matches\n")
+    print(f"Loaded {len(sample_X_norm)} matches\n")
 
-    # Make predictions
+    # Make predictions (use normalized data)
     model.eval()
     with torch.no_grad():
-        sample_X_device = sample_X.to(Config.DEVICE)
+        sample_X_device = sample_X_norm.to(Config.DEVICE)
         pred_scores = model(sample_X_device)
 
     # Initialize decoder
     vocab = TFTVocabulary()
     decoder = TFTMatchDecoder(vocab)
 
-    # Pretty print predictions
+    # Pretty print predictions (use ORIGINAL data for decoder)
     print_match_predictions(
-        X=sample_X,
+        X=sample_X_orig,  # Use original (non-normalized) data
         Y_relevance=sample_Y,
         pred_scores=pred_scores.cpu(),
         decoder=decoder,
-        num_matches=len(sample_X)
+        num_matches=len(sample_X_norm)
     )
 
 

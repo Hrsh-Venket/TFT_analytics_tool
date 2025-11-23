@@ -51,8 +51,9 @@ class TFTMatchDecoder:
         items_binary = unit_features[self.vocab.num_units:self.vocab.num_units + self.vocab.num_items]
         tier = int(unit_features[-1])
 
-        # Check if unit slot is empty (all zeros)
-        if unit_onehot.sum() == 0:
+        # Check if unit slot is empty (all zeros or very close to zero)
+        # Use small epsilon for floating-point robustness
+        if unit_onehot.sum() < 0.1 and tier == 0:
             return None
 
         # Decode unit name
