@@ -12,12 +12,13 @@ def test_bigquery_data():
     print("TESTING BIGQUERY DATA")
     print("="*80)
 
-    # Load just 1 match
-    print("\nLoading 1 match from BigQuery...")
-    matches = load_matches_from_bigquery(limit=1)
+    # Load matches until we find a complete one (with 8 players)
+    print("\nLoading matches from BigQuery (looking for complete matches)...")
+    matches = load_matches_from_bigquery(limit=10)  # Load 10 matches to find a complete one
 
     if not matches:
-        print("❌ No matches found!")
+        print("❌ No complete matches found!")
+        print("   Try loading more matches or check your BigQuery data.")
         return
 
     match = matches[0]
