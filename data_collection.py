@@ -340,6 +340,32 @@ class RiotAPIClient:
 # Set detection data loading removed - use manual timestamp instead
 
 
+def parse_max_matches(value):
+    """
+    Parse max-matches-per-player argument.
+
+    Args:
+        value: String value from command line
+
+    Returns:
+        int or None (None means unlimited)
+    """
+    if value is None:
+        return None
+
+    value_lower = value.lower()
+    if value_lower in ['maximum', 'max', 'unlimited', 'infinity', 'inf', 'all']:
+        return None
+
+    try:
+        num = int(value)
+        if num <= 0:
+            raise ValueError("max-matches-per-player must be positive")
+        return num
+    except ValueError:
+        raise ValueError(f"Invalid max-matches-per-player value: {value}. Use a positive number or 'maximum'")
+
+
 def initialize_global_tracker_from_existing_data(jsonl_files=None):
     """
     Initialize the global match tracker from existing JSONL files.
@@ -642,15 +668,15 @@ def test_bigquery_integration():
     print(f"\n✓ Test completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER', 
+def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER',
                                 region_matches='sea', region_players='sg2',
                                 output_file=None, batch_size=50, max_workers=5,
-                                progress_file=None):
+                                progress_file=None, max_matches_per_player=None):
     """
     Collect all TFT match data from a specific timestamp from high-tier players.
-    
+
     :param api_key: Riot Games API key
-    :param start_timestamp: Start timestamp (epoch seconds)
+    :param start_timestamp: Start timestamp (API seconds since June 16, 2021)
     :param tier: Minimum tier to collect data from
     :param region_matches: Region for match data
     :param region_players: Region for player rankings
@@ -658,6 +684,7 @@ def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER',
     :param batch_size: Number of matches to process in each batch
     :param max_workers: Number of concurrent workers
     :param progress_file: Progress tracking file (auto-generated if None)
+    :param max_matches_per_player: Maximum matches to collect per player (None = unlimited)
     """
     if output_file is None:
         output_file = 'matches.jsonl'
@@ -722,16 +749,21 @@ def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER',
             player_match_ids = client.get_period_match_ids(
                 puuid, region_matches, period_start_timestamp, current_time
             )
-            
+
             print(f"   Found {len(player_match_ids)} matches in period timeframe")
-            
+
+            # Limit matches per player if specified
+            if max_matches_per_player and len(player_match_ids) > max_matches_per_player:
+                player_match_ids = player_match_ids[:max_matches_per_player]
+                print(f"   Limited to {max_matches_per_player} most recent matches")
+
             # Filter out already processed matches (including globally downloaded ones)
             session_new = [mid for mid in player_match_ids if not progress.is_match_processed(mid)]
             globally_downloaded = [mid for mid in player_match_ids if progress.is_match_downloaded_globally(mid)]
-            
+
             print(f"   Already downloaded globally: {len(globally_downloaded)}")
             print(f"   New matches to collect: {len(session_new)}")
-            
+
             new_match_ids = session_new
             
             if new_match_ids:
@@ -1005,6 +1037,8 @@ Examples:
                         help='Batch size for processing matches (default: 50)')
     parser.add_argument('--max-workers', type=int, default=5,
                         help='Maximum concurrent workers (default: 5)')
+    parser.add_argument('--max-matches-per-player', type=str, default=None,
+                        help='Maximum matches to collect per player. Use "maximum" or "unlimited" for no limit (default: unlimited)')
 
     # Special modes
     parser.add_argument('--test-mode', action='store_true',
@@ -1025,8 +1059,18 @@ if __name__ == "__main__":
     # Parse command-line arguments
     args = parse_arguments()
 
-    # Calculate start timestamp from days
-    START_TIMESTAMP = (130032000 + (args.days * 86400))
+    # Parse max-matches-per-player argument
+    try:
+        max_matches_per_player = parse_max_matches(args.max_matches_per_player)
+    except ValueError as e:
+        print(f"❌ Error: {e}")
+        sys.exit(1)
+
+    # Calculate start timestamp for "last X days"
+    # API time = seconds since June 16, 2021
+    API_EPOCH = 1623772801
+    current_api_time = int(time.time()) - API_EPOCH
+    START_TIMESTAMP = current_api_time - (args.days * 86400)
 
     print("TFT Data Collection System")
     print("=" * 50)
@@ -1042,6 +1086,10 @@ if __name__ == "__main__":
     print(f"  Storage: {'BigQuery + JSONL' if BIGQUERY_AVAILABLE else 'JSONL only'}")
     print(f"  Output file: {args.output_file}")
     print(f"  API batch size: {args.batch_size}, Workers: {args.max_workers}")
+    if max_matches_per_player is None:
+        print(f"  Max matches per player: unlimited")
+    else:
+        print(f"  Max matches per player: {max_matches_per_player}")
 
     if args.test_mode:
         print(f"  Mode: TEST MODE - Using structure.json data")
@@ -1071,7 +1119,7 @@ if __name__ == "__main__":
 
     # Run period-based collection
     print(f"Starting period-based collection from timestamp {START_TIMESTAMP}")
-    readable_time = datetime.fromtimestamp(START_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')
+    readable_time = datetime.fromtimestamp(API_EPOCH + START_TIMESTAMP).strftime('%Y-%m-%d %H:%M:%S')
     print(f"Start time: {readable_time}")
 
     success = collect_period_match_data(
@@ -1082,7 +1130,8 @@ if __name__ == "__main__":
         region_players=args.region_players,
         output_file=args.output_file,
         batch_size=args.batch_size,
-        max_workers=args.max_workers
+        max_workers=args.max_workers,
+        max_matches_per_player=max_matches_per_player
     )
 
     print("\n" + "="*60)
