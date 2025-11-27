@@ -205,6 +205,7 @@ def stream_matches_from_bigquery(
 
     # Stream and group by match_id
     matches_dict = {}
+    completed_batch = {}
     row_count = 0
     matches_yielded = 0
     incomplete_count = 0
@@ -257,36 +258,31 @@ def stream_matches_from_bigquery(
 
         matches_dict[match_id]['participants'].append(participant)
 
-        # Check if we have complete matches to yield
-        complete_matches = []
-        incomplete_match_ids = []
-
-        for mid, match in list(matches_dict.items()):
-            if len(match['participants']) == 8:
-                complete_matches.append(match)
-                del matches_dict[mid]
-            elif len(match['participants']) > 8:
-                # This shouldn't happen, but handle it
-                incomplete_count += 1
-                del matches_dict[mid]
+        # If this match is now complete (has 8 players), add to completed batch
+        if len(matches_dict[match_id]['participants']) == 8:
+            if match_id not in completed_batch:
+                completed_batch[match_id] = matches_dict[match_id]
+                del matches_dict[match_id]
+        elif len(matches_dict[match_id]['participants']) > 8:
+            # This shouldn't happen, but handle it
+            incomplete_count += 1
+            del matches_dict[match_id]
 
         # Yield batch when we have enough complete matches
-        if len(complete_matches) >= batch_size:
-            matches_yielded += len(complete_matches)
-            yield complete_matches
-            complete_matches = []
+        if len(completed_batch) >= batch_size:
+            matches_yielded += len(completed_batch)
+            yield list(completed_batch.values())
+            completed_batch = {}
 
-    # Yield any remaining complete matches
-    final_batch = []
+    # Yield any remaining complete matches from completed_batch
+    if completed_batch:
+        matches_yielded += len(completed_batch)
+        yield list(completed_batch.values())
+
+    # Check for any stragglers in matches_dict (shouldn't happen with ORDER BY)
     for match in matches_dict.values():
-        if len(match['participants']) == 8:
-            final_batch.append(match)
-        else:
+        if len(match['participants']) != 8:
             incomplete_count += 1
-
-    if final_batch:
-        matches_yielded += len(final_batch)
-        yield final_batch
 
     total_time = time.time() - start_time
     print(f"✓ Streamed {row_count:,} rows → {matches_yielded:,} complete matches in {total_time:.1f}s")
