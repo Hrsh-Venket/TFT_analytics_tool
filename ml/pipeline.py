@@ -13,7 +13,7 @@ import os
 from typing import Optional, Tuple
 from ml.vocabulary import TFTVocabulary
 from ml.encoder import TFTMatchEncoder
-from ml.data_loader import load_matches_from_bigquery
+from ml.data_loader import load_matches_from_bigquery, stream_matches_from_bigquery
 
 
 def get_memory_usage_mb():
@@ -36,11 +36,11 @@ def process_matches_to_hdf5_incremental(
     limit: Optional[int] = None,
     max_units: int = 15,
     mappings_dir: str = 'name_mappings',
-    batch_size: int = 100
+    batch_size: int = 500
 ) -> Tuple[TFTMatchEncoder, int]:
     """
-    Load matches from BigQuery and write directly to HDF5 incrementally.
-    This avoids memory issues by never loading all data into memory at once.
+    Stream matches from BigQuery and write directly to HDF5 incrementally.
+    This avoids memory issues by processing in small batches and never loading all data at once.
 
     Args:
         output_file: Output HDF5 file path (temporary file, will be overwritten)
@@ -49,19 +49,22 @@ def process_matches_to_hdf5_incremental(
         limit: Optional limit on number of matches
         max_units: Maximum units per board
         mappings_dir: Directory with CSV mappings
-        batch_size: Progress reporting interval
+        batch_size: Number of matches to process per batch (default: 500)
 
     Returns:
         Tuple of (encoder, num_matches_encoded)
     """
     print("="*80)
-    print("TFT ML DATA PIPELINE (INCREMENTAL HDF5)")
+    print("TFT ML DATA PIPELINE (STREAMING + INCREMENTAL HDF5)")
+    print("="*80)
+    print(f"Batch size: {batch_size} matches per batch")
+    print(f"Memory-optimized: Processing in small batches, writing directly to disk")
     print("="*80)
 
     initial_mem = log_memory("Initial")
 
     # Step 1: Load vocabulary
-    print("\n[1/5] Loading vocabulary...")
+    print("\n[1/4] Loading vocabulary...")
     vocab = TFTVocabulary(mappings_dir=mappings_dir)
     stats = vocab.get_stats()
     print(f"  Units: {stats['units']}")
@@ -70,7 +73,7 @@ def process_matches_to_hdf5_incremental(
     log_memory("After vocab load")
 
     # Step 2: Initialize encoder
-    print("\n[2/5] Initializing encoder...")
+    print("\n[2/4] Initializing encoder...")
     encoder = TFTMatchEncoder(vocabulary=vocab, max_units=max_units)
     feature_info = encoder.get_feature_info()
     print(f"  Player feature dim: {feature_info['player_feature_dim']}")
@@ -78,86 +81,110 @@ def process_matches_to_hdf5_incremental(
     match_feature_dim = feature_info['match_feature_dim']
     log_memory("After encoder init")
 
-    # Step 3: Load matches from BigQuery
-    print("\n[3/5] Loading matches from BigQuery...")
-    matches = load_matches_from_bigquery(
-        project_id=project_id,
-        dataset_id=dataset_id,
-        limit=limit
-    )
+    # Step 3: Stream matches from BigQuery and encode in batches
+    print("\n[3/4] Streaming matches from BigQuery...")
+    print(f"Processing and encoding in batches of {batch_size} matches...")
+    print()
 
-    if not matches:
-        raise ValueError("No matches loaded!")
-
-    num_matches = len(matches)
-    print(f"✓ Loaded {num_matches} matches")
-    log_memory("After loading matches")
-
-    # Step 4: Create HDF5 file with pre-allocated datasets
-    print(f"\n[4/5] Creating HDF5 file: {output_file}")
-    print(f"  Pre-allocating space for {num_matches} matches...")
-
+    # Create HDF5 file with resizable datasets (we don't know total count yet)
     with h5py.File(output_file, 'w') as f:
-        # Pre-allocate datasets
+        # Create resizable datasets
         X_dataset = f.create_dataset(
             'X',
-            shape=(num_matches, match_feature_dim),
+            shape=(0, match_feature_dim),
+            maxshape=(None, match_feature_dim),
             dtype=np.int32,
-            chunks=(min(batch_size, num_matches), match_feature_dim),
+            chunks=(batch_size, match_feature_dim),
             compression='gzip',
             compression_opts=4
         )
 
         Y_dataset = f.create_dataset(
             'Y',
-            shape=(num_matches, 8),
+            shape=(0, 8),
+            maxshape=(None, 8),
             dtype=np.int32,
-            chunks=(min(batch_size, num_matches), 8),
+            chunks=(batch_size, 8),
             compression='gzip',
             compression_opts=4
         )
 
-        print(f"✓ HDF5 file created")
+        print(f"✓ HDF5 file created with resizable datasets")
         log_memory("After HDF5 creation")
 
-        # Step 5: Encode matches and write incrementally
-        print(f"\n[5/5] Encoding and writing {num_matches} matches incrementally...")
+        print(f"\n[4/4] Streaming, encoding, and writing batches...")
+        print()
 
         encoded_count = 0
         failed_count = 0
+        batch_num = 0
 
-        for i, match in enumerate(matches):
-            try:
-                X, Y = encoder.encode_match(match)
+        # Stream matches in batches
+        for match_batch in stream_matches_from_bigquery(
+            project_id=project_id,
+            dataset_id=dataset_id,
+            limit=limit,
+            batch_size=batch_size
+        ):
+            batch_num += 1
+            batch_start_mem = get_memory_usage_mb()
 
-                # Write directly to HDF5
-                X_dataset[encoded_count] = X
-                Y_dataset[encoded_count] = Y
+            print(f"\n  ┌─ Batch {batch_num}: {len(match_batch)} matches")
+            print(f"  │  Memory before batch: {batch_start_mem:.1f} MB")
 
-                encoded_count += 1
+            # Encode batch
+            X_batch = []
+            Y_batch = []
+            batch_failed = 0
 
-                # Progress reporting
-                if (encoded_count) % batch_size == 0:
-                    print(f"  Encoded {encoded_count}/{num_matches} matches...")
-                    log_memory(f"Batch {encoded_count}")
+            for match in match_batch:
+                try:
+                    X, Y = encoder.encode_match(match)
+                    X_batch.append(X)
+                    Y_batch.append(Y)
+                except Exception as e:
+                    batch_failed += 1
+                    failed_count += 1
 
-            except Exception as e:
-                failed_count += 1
-                print(f"  Warning: Failed to encode match {match.get('match_id', 'unknown')}: {e}")
-                continue
+            if X_batch:
+                # Convert to numpy arrays
+                X_batch = np.array(X_batch, dtype=np.int32)
+                Y_batch = np.array(Y_batch, dtype=np.int32)
 
-        # If we had failures, resize datasets
-        if encoded_count < num_matches:
-            print(f"\n  Resizing datasets: {num_matches} → {encoded_count} (removed {failed_count} failed matches)")
-            X_dataset.resize((encoded_count, match_feature_dim))
-            Y_dataset.resize((encoded_count, 8))
+                # Resize datasets and append
+                current_size = X_dataset.shape[0]
+                new_size = current_size + len(X_batch)
+                X_dataset.resize((new_size, match_feature_dim))
+                Y_dataset.resize((new_size, 8))
 
-    print(f"\n✓ Incremental encoding complete!")
-    print(f"  Successfully encoded: {encoded_count}/{num_matches} matches")
-    print(f"  Failed: {failed_count} matches")
+                X_dataset[current_size:new_size] = X_batch
+                Y_dataset[current_size:new_size] = Y_batch
+
+                encoded_count += len(X_batch)
+
+            batch_end_mem = get_memory_usage_mb()
+            batch_mem_delta = batch_end_mem - batch_start_mem
+
+            print(f"  │  Encoded: {len(X_batch)}/{len(match_batch)} (failed: {batch_failed})")
+            print(f"  │  Total encoded so far: {encoded_count}")
+            print(f"  │  Memory after batch: {batch_end_mem:.1f} MB (Δ {batch_mem_delta:+.1f} MB)")
+            print(f"  └─ Batch {batch_num} complete\n")
+
+            # Clear batch data from memory
+            del X_batch, Y_batch, match_batch
+
+    print()
+    print("="*80)
+    print("✓ STREAMING ENCODING COMPLETE!")
+    print("="*80)
+    print(f"  Successfully encoded: {encoded_count} matches")
+    if failed_count > 0:
+        print(f"  Failed: {failed_count} matches")
 
     final_mem = log_memory("Final")
-    print(f"  Memory delta: {final_mem - initial_mem:.1f} MB")
+    print(f"  Memory delta: {final_mem - initial_mem:+.1f} MB")
+    print(f"  Output file: {output_file}")
+    print("="*80)
 
     return encoder, encoded_count
 
