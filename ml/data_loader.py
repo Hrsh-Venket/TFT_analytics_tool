@@ -41,6 +41,10 @@ def load_matches_from_bigquery(
         match_limit_query = ""
         join_clause = ""
 
+    # Only use ORDER BY when limiting (for deterministic sampling)
+    # Skip ORDER BY for full data loads (much faster, data will be shuffled anyway)
+    order_by_clause = "ORDER BY p.match_id, p.placement" if limit else ""
+
     query = f"""
     {match_limit_query}
     SELECT
@@ -51,21 +55,30 @@ def load_matches_from_bigquery(
         p.traits
     FROM `{project_id}.{dataset_id}.match_participants` p
     {join_clause}
-    ORDER BY p.match_id, p.placement
+    {order_by_clause}
     """
 
     print(f"Loading matches from BigQuery...")
     print(f"Project: {project_id}, Dataset: {dataset_id}")
     if limit:
         print(f"Limit: {limit} matches")
+    else:
+        print(f"Loading ALL data (skipping ORDER BY for performance)")
 
     # Execute query
     query_job = client.query(query)
     results = query_job.result()
 
+    print(f"Query complete. Processing rows...")
+
     # Group by match_id
     matches_dict = {}
+    row_count = 0
     for row in results:
+        row_count += 1
+        if row_count % 10000 == 0:
+            print(f"  Processed {row_count:,} rows, {len(matches_dict):,} matches so far...")
+
         match_id = row.match_id
 
         if match_id not in matches_dict:
