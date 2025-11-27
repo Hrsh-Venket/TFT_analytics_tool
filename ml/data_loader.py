@@ -193,7 +193,7 @@ def stream_matches_from_bigquery(
     if limit:
         print(f"Limit: {limit} matches")
     else:
-        print(f"Streaming ALL data (skipping ORDER BY for performance)")
+        print(f"Loading ALL data with ORDER BY (ensures matches stream correctly)")
 
     # Execute query
     print(f"Executing BigQuery query...")
