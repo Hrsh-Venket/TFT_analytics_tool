@@ -172,8 +172,8 @@ def stream_matches_from_bigquery(
         match_limit_query = ""
         join_clause = ""
 
-    # Skip ORDER BY for full data loads (faster)
-    order_by_clause = "ORDER BY p.match_id, p.placement" if limit else ""
+    # Always use ORDER BY so matches complete predictably during streaming
+    order_by_clause = "ORDER BY p.match_id, p.placement"
 
     query = f"""
     {match_limit_query}
