@@ -53,6 +53,9 @@ class TFTRankingModel(nn.Module):
         self.n_heads = n_heads
         self.dropout = dropout
 
+        # Input normalization (normalizes raw features before embedding)
+        self.input_norm = nn.BatchNorm1d(player_feature_dim)
+
         # Input embedding layer
         self.input_fc = nn.Linear(player_feature_dim, hidden_dim)
 
@@ -85,6 +88,14 @@ class TFTRankingModel(nn.Module):
             scores: Output tensor of shape (batch, 8)
                    Higher scores indicate better expected placement
         """
+        # Input normalization
+        # BatchNorm1d expects (batch, features) or (batch, features, seq)
+        # Our input is (batch, 8, features), so we need to permute
+        batch_size, num_players, feature_dim = x.shape
+        x = x.permute(0, 2, 1)  # (batch, features, 8)
+        x = self.input_norm(x)   # Normalize across batch
+        x = x.permute(0, 2, 1)  # (batch, 8, features)
+
         # Input embedding
         x = self.input_fc(x)  # (batch, 8, hidden_dim)
         x = self.dropout_layer(x)
