@@ -5,15 +5,34 @@ This module handles loading and applying name mappings for units, traits, and it
 to convert raw API identifiers into clean, readable names for BigQuery storage.
 
 Supports both Latest_Mappings and Default_Mappings directories.
+
+Can initialize Latest_Mappings from collected match data (subset.json).
 """
 
 import csv
+import json
 import logging
+import re
 import shutil
-from typing import Dict, Optional, Literal
+from typing import Dict, Optional, Literal, Set, Tuple
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# CONFIGURABLE PREFIXES TO REMOVE
+# Add or remove prefixes here as needed for new TFT sets
+# =============================================================================
+PREFIXES_TO_REMOVE = [
+    "TFT14_",
+    "TFT15_",
+    "TFT16_",
+    "TFT17_",
+    "TFT_",
+]
+
+# Pattern to match trailing _XX number suffixes (e.g., _34, _123)
+SUFFIX_PATTERN = re.compile(r'_\d+$')
 
 # Get the directory where this file is located
 MODULE_DIR = Path(__file__).parent.resolve()
@@ -401,28 +420,270 @@ def map_match_data(match_data: Dict, mapping_type: MappingType = "latest") -> Di
     return mapped_match
 
 
-if __name__ == "__main__":
-    # Test the mapper with both mapping types
-    print("Testing Latest Mappings:")
-    latest_mapper = TFTNameMapper(mapping_type="latest")
-    stats = latest_mapper.get_mapping_stats()
-    print(f"Latest Mapper Statistics: {stats}")
+# =============================================================================
+# SUBSET.JSON INITIALIZATION FUNCTIONS
+# =============================================================================
 
-    print("\nTesting Default Mappings:")
+SUBSET_FILE = MODULE_DIR / "subset.json"
+
+
+def clean_raw_name(raw_name: str) -> str:
+    """
+    Clean a raw API name by removing prefixes and suffixes.
+
+    Removes:
+    - Prefixes like TFT16_, TFT15_, etc. (configurable in PREFIXES_TO_REMOVE)
+    - Trailing number suffixes like _34, _123
+
+    Args:
+        raw_name: Raw name from API (e.g., 'TFT16_Jinx_34')
+
+    Returns:
+        Cleaned name (e.g., 'Jinx')
+    """
+    if not raw_name:
+        return raw_name
+
+    cleaned = raw_name
+
+    # Remove prefixes (try longest first to avoid partial matches)
+    for prefix in sorted(PREFIXES_TO_REMOVE, key=len, reverse=True):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):]
+            break
+
+    # Remove trailing number suffix (e.g., _34)
+    cleaned = SUFFIX_PATTERN.sub('', cleaned)
+
+    return cleaned
+
+
+def load_subset_json() -> dict:
+    """
+    Load the subset.json file.
+
+    Returns:
+        Parsed JSON data or empty dict if file not found
+    """
+    if not SUBSET_FILE.exists():
+        logger.warning(f"subset.json not found at {SUBSET_FILE}")
+        return {}
+
+    with open(SUBSET_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def extract_unique_names_from_subset(subset_data: dict) -> Tuple[Set[str], Set[str], Set[str]]:
+    """
+    Extract all unique unit, trait, and item names from subset data.
+
+    Args:
+        subset_data: Parsed subset.json data
+
+    Returns:
+        Tuple of (units_set, traits_set, items_set)
+    """
+    units = set()
+    traits = set()
+    items = set()
+
+    matches = subset_data.get('matches', [])
+
+    for match in matches:
+        for participant in match.get('participants', []):
+            # Extract units
+            for unit in participant.get('units', []):
+                char_id = unit.get('character_id', '')
+                if char_id:
+                    units.add(char_id)
+
+                # Extract items from units
+                for item in unit.get('item_names', []):
+                    if item:
+                        items.add(item)
+
+            # Extract traits
+            for trait in participant.get('traits', []):
+                trait_name = trait.get('name', '')
+                if trait_name:
+                    traits.add(trait_name)
+
+    return units, traits, items
+
+
+def load_default_mappings() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+    """
+    Load all default mappings.
+
+    Returns:
+        Tuple of (units_mapping, traits_mapping, items_mapping)
+    """
     default_mapper = TFTNameMapper(mapping_type="default")
-    stats = default_mapper.get_mapping_stats()
-    print(f"Default Mapper Statistics: {stats}")
+    return (
+        default_mapper.units_mapping,
+        default_mapper.traits_mapping,
+        default_mapper.items_mapping
+    )
 
-    # Test some mappings
-    print(f"\nRaw 'TFT15_Jinx' -> '{latest_mapper.map_unit_name('TFT15_Jinx')}'")
-    print(f"Raw 'TFT15_DrMundo' -> '{latest_mapper.map_unit_name('TFT15_DrMundo')}'")
 
-    # Test name formatting
-    print("\nTesting name formatting:")
-    print(f"'DrMundo' -> '{format_name_with_underscores('DrMundo')}'")
-    print(f"'JarvanIV' -> '{format_name_with_underscores('JarvanIV')}'")
-    print(f"'Infinity Edge' -> '{format_name_with_underscores('Infinity Edge')}'")
+def write_mapping_csv(file_path: Path, mapping: Dict[str, str]):
+    """
+    Write a mapping dictionary to CSV file.
 
-    # Test initialization function
-    print("\nTesting initialize_latest_from_default():")
-    print("(Dry run - would copy default files to latest)")
+    Args:
+        file_path: Path to output CSV
+        mapping: Dictionary of old_name -> new_name
+    """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['old_name', 'new_name'])
+
+        for old_name in sorted(mapping.keys()):
+            writer.writerow([old_name, mapping[old_name]])
+
+
+def initialize_latest_from_subset(dry_run: bool = False) -> bool:
+    """
+    Initialize Latest_Mappings from subset.json.
+
+    Process:
+    1. Load subset.json and extract unique units/traits/items
+    2. Create initial mappings by cleaning names (remove prefixes/suffixes)
+    3. Apply any overrides from Default_Mappings
+    4. Write to Latest_Mappings CSVs
+
+    Args:
+        dry_run: If True, only print what would be done without writing files
+
+    Returns:
+        True if successful, False otherwise
+    """
+    print("Initializing Latest_Mappings from subset.json...")
+    print(f"Prefixes to remove: {PREFIXES_TO_REMOVE}")
+    print()
+
+    # Step 1: Load subset.json
+    subset_data = load_subset_json()
+    if not subset_data:
+        print("Error: Could not load subset.json")
+        print(f"Expected location: {SUBSET_FILE}")
+        print("Run collect_subset.py first to generate this file.")
+        return False
+
+    print(f"Loaded {subset_data.get('num_matches', 0)} matches from subset.json")
+    print(f"Collected at: {subset_data.get('collected_at', 'unknown')}")
+    print()
+
+    # Step 2: Extract unique names
+    units, traits, items = extract_unique_names_from_subset(subset_data)
+    print(f"Found unique entries:")
+    print(f"  Units:  {len(units)}")
+    print(f"  Traits: {len(traits)}")
+    print(f"  Items:  {len(items)}")
+    print()
+
+    # Step 3: Create initial mappings by cleaning names
+    units_mapping = {name: clean_raw_name(name) for name in units}
+    traits_mapping = {name: clean_raw_name(name) for name in traits}
+    items_mapping = {name: clean_raw_name(name) for name in items}
+
+    # Step 4: Load and apply Default_Mappings overrides
+    default_units, default_traits, default_items = load_default_mappings()
+
+    overrides_applied = {'units': 0, 'traits': 0, 'items': 0}
+
+    for old_name in units_mapping:
+        if old_name in default_units:
+            units_mapping[old_name] = default_units[old_name]
+            overrides_applied['units'] += 1
+
+    for old_name in traits_mapping:
+        if old_name in default_traits:
+            traits_mapping[old_name] = default_traits[old_name]
+            overrides_applied['traits'] += 1
+
+    for old_name in items_mapping:
+        if old_name in default_items:
+            items_mapping[old_name] = default_items[old_name]
+            overrides_applied['items'] += 1
+
+    print(f"Applied Default_Mappings overrides:")
+    print(f"  Units:  {overrides_applied['units']}")
+    print(f"  Traits: {overrides_applied['traits']}")
+    print(f"  Items:  {overrides_applied['items']}")
+    print()
+
+    # Step 5: Write to Latest_Mappings
+    if dry_run:
+        print("DRY RUN - Would write to:")
+        print(f"  {LATEST_MAPPINGS_DIR / 'units.csv'}")
+        print(f"  {LATEST_MAPPINGS_DIR / 'traits.csv'}")
+        print(f"  {LATEST_MAPPINGS_DIR / 'items.csv'}")
+        print()
+        print("Sample mappings:")
+        print("  Units:")
+        for old, new in list(units_mapping.items())[:5]:
+            print(f"    {old} -> {new}")
+        print("  Traits:")
+        for old, new in list(traits_mapping.items())[:5]:
+            print(f"    {old} -> {new}")
+        print("  Items:")
+        for old, new in list(items_mapping.items())[:5]:
+            print(f"    {old} -> {new}")
+    else:
+        LATEST_MAPPINGS_DIR.mkdir(parents=True, exist_ok=True)
+
+        write_mapping_csv(LATEST_MAPPINGS_DIR / 'units.csv', units_mapping)
+        write_mapping_csv(LATEST_MAPPINGS_DIR / 'traits.csv', traits_mapping)
+        write_mapping_csv(LATEST_MAPPINGS_DIR / 'items.csv', items_mapping)
+
+        print(f"Written to {LATEST_MAPPINGS_DIR}:")
+        print(f"  units.csv:  {len(units_mapping)} entries")
+        print(f"  traits.csv: {len(traits_mapping)} entries")
+        print(f"  items.csv:  {len(items_mapping)} entries")
+
+    print()
+    print("Initialization complete!")
+    return True
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='TFT Name Mapper')
+    parser.add_argument('--init-from-subset', action='store_true',
+                        help='Initialize Latest_Mappings from subset.json')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Show what would be done without writing files')
+    parser.add_argument('--test', action='store_true',
+                        help='Run basic mapping tests')
+
+    args = parser.parse_args()
+
+    if args.init_from_subset:
+        initialize_latest_from_subset(dry_run=args.dry_run)
+    elif args.test:
+        # Test the mapper with both mapping types
+        print("Testing Latest Mappings:")
+        latest_mapper = TFTNameMapper(mapping_type="latest")
+        stats = latest_mapper.get_mapping_stats()
+        print(f"Latest Mapper Statistics: {stats}")
+
+        print("\nTesting Default Mappings:")
+        default_mapper = TFTNameMapper(mapping_type="default")
+        stats = default_mapper.get_mapping_stats()
+        print(f"Default Mapper Statistics: {stats}")
+
+        # Test some mappings
+        print(f"\nRaw 'TFT15_Jinx' -> '{latest_mapper.map_unit_name('TFT15_Jinx')}'")
+        print(f"Raw 'TFT15_DrMundo' -> '{latest_mapper.map_unit_name('TFT15_DrMundo')}'")
+
+        # Test name cleaning
+        print("\nTesting clean_raw_name():")
+        print(f"'TFT16_Jinx_34' -> '{clean_raw_name('TFT16_Jinx_34')}'")
+        print(f"'TFT15_DrMundo' -> '{clean_raw_name('TFT15_DrMundo')}'")
+        print(f"'TFT_Item_InfinityEdge' -> '{clean_raw_name('TFT_Item_InfinityEdge')}'")
+    else:
+        parser.print_help()
