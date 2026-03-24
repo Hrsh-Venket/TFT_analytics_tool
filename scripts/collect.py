@@ -30,14 +30,11 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from riot_api_functions import RateLimiter, RiotAPIClient
+from tft_analytics.api import RateLimiter, RiotAPIClient
 
 try:
     from google.cloud import bigquery
-    from bigquery_operations import BigQueryDataImporter
+    from tft_analytics.bigquery import BigQueryDataImporter
     from google.cloud.exceptions import NotFound, Forbidden
     import pandas as pd
     BIGQUERY_AVAILABLE = True

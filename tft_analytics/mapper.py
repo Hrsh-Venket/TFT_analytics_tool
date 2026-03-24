@@ -36,8 +36,8 @@ SUFFIX_PATTERN = re.compile(r'_\d+$')
 
 # Get the directory where this file is located
 MODULE_DIR = Path(__file__).parent.resolve()
-LATEST_MAPPINGS_DIR = MODULE_DIR / "Latest_Mappings"
-DEFAULT_MAPPINGS_DIR = MODULE_DIR / "Default_Mappings"
+LATEST_MAPPINGS_DIR = MODULE_DIR / "mappings" / "latest"
+DEFAULT_MAPPINGS_DIR = MODULE_DIR / "mappings" / "defaults"
 
 MappingType = Literal["latest", "default"]
 
@@ -75,9 +75,9 @@ class TFTNameMapper:
                 traits_file = self.mappings_dir / "traits.csv"
                 items_file = self.mappings_dir / "items.csv"
             else:  # default
-                units_file = self.mappings_dir / "units_default.csv"
-                traits_file = self.mappings_dir / "traits_default.csv"
-                items_file = self.mappings_dir / "items_default.csv"
+                units_file = self.mappings_dir / "units.csv"
+                traits_file = self.mappings_dir / "traits.csv"
+                items_file = self.mappings_dir / "items.csv"
 
             # Load units mapping
             if units_file.exists():
@@ -328,9 +328,9 @@ def initialize_latest_from_default():
 
         # Copy each default file to latest
         default_files = {
-            'units_default.csv': 'units.csv',
-            'traits_default.csv': 'traits.csv',
-            'items_default.csv': 'items.csv'
+            'units.csv': 'units.csv',
+            'traits.csv': 'traits.csv',
+            'items.csv': 'items.csv'
         }
 
         for default_file, latest_file in default_files.items():

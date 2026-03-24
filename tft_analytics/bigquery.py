@@ -10,7 +10,7 @@ from google.cloud.exceptions import NotFound, Conflict
 import pandas as pd
 from datetime import datetime
 import json
-from name_mapper import map_match_data, get_mapper
+from tft_analytics.mapper import map_match_data, get_mapper
 
 class BigQueryDataImporter:
     """

@@ -15,7 +15,6 @@ Examples:
     python collect_subset.py --api-key RGAPI-xxxxx --num-matches 300 --tier MASTER --days 7
 """
 
-import sys
 import json
 import argparse
 import time
@@ -23,13 +22,10 @@ from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "02-Data_Collection"))
+from tft_analytics.api import RiotAPIClient
 
-from riot_api_functions import RiotAPIClient
-
-# Output file location
-OUTPUT_FILE = Path(__file__).parent / "subset.json"
+# Output file location (in project root data directory)
+OUTPUT_FILE = Path(__file__).parent.parent / "data" / "subset.json"
 
 
 def extract_match_data(match_details: dict) -> dict:
