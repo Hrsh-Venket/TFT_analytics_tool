@@ -4,7 +4,7 @@
 class TFTAnalyticsAPI {
     constructor() {
         // Configure API base URL - update with your project ID
-        this.PROJECT_ID = 'your-project-id'; // TODO: Update this
+        this.PROJECT_ID = 'tft-analytics-tool'; 
         this.REGION = 'asia-southeast1';
         this.BASE_URL = `https://${this.REGION}-${this.PROJECT_ID}.cloudfunctions.net`;
 
