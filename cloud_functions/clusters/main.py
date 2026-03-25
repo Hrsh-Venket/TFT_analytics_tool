@@ -3,37 +3,31 @@ Cloud Function: GET /api/clusters
 Returns available TFT composition clusters from BigQuery analysis
 """
 
-import sys
-import os
-
-from utils import handle_cors_preflight, json_response, error_response, get_bigquery_client
-from bigquery_operations import BigQueryDataImporter
 import logging
 
-# Set up logging
+from utils import handle_cors_preflight, json_response, error_response, get_bigquery_client
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+DATASET_ID = 'tft_analytics'
+
 
 def get_clusters(request):
     """
     Cloud Function entry point for /api/clusters
     Returns list of available clusters with metadata
     """
-
-    # Handle CORS preflight
     cors_response = handle_cors_preflight(request)
     if cors_response:
         return cors_response
 
     try:
-        # Initialize BigQuery connection
-        logger.info("Initializing BigQuery connection for clusters")
-        importer = BigQueryDataImporter()
         client = get_bigquery_client()
+        project_id = client.project
+        clusters_table = f"{project_id}.{DATASET_ID}.main_clusters"
 
-        # Check if clusters table exists, if not return empty list
         try:
-            clusters_table = importer.main_clusters_table
 
             # Query main clusters with metadata
             clusters_query = f"""
