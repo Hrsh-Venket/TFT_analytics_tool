@@ -101,14 +101,14 @@ class TFTQuery:
             condition = """
                 EXISTS (
                     SELECT 1 FROM UNNEST(units) AS unit
-                    WHERE unit.character_id = @unit_id
+                    WHERE unit.name = @unit_id
                 )
             """
         else:
             condition = """
                 NOT EXISTS (
                     SELECT 1 FROM UNNEST(units) AS unit
-                    WHERE unit.character_id = @unit_id
+                    WHERE unit.name = @unit_id
                 )
             """
         
@@ -129,7 +129,7 @@ class TFTQuery:
         condition = """
             (SELECT COUNT(*) 
              FROM UNNEST(units) AS unit
-             WHERE unit.character_id = @unit_id) = @count
+             WHERE unit.name = @unit_id) = @count
         """
         
         self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "count": count}))
@@ -150,7 +150,7 @@ class TFTQuery:
         condition = """
             EXISTS (
                 SELECT 1 FROM UNNEST(units) AS unit
-                WHERE unit.character_id = @unit_id
+                WHERE unit.name = @unit_id
                 AND unit.tier >= @min_star
                 AND unit.tier <= @max_star
             )
@@ -181,7 +181,7 @@ class TFTQuery:
             EXISTS (
                 SELECT 1 FROM UNNEST(units) AS unit
                 CROSS JOIN UNNEST(unit.item_names) AS item
-                WHERE unit.character_id = @unit_id
+                WHERE unit.name = @unit_id
                 AND item = @item_id
             )
         """
@@ -204,7 +204,7 @@ class TFTQuery:
         condition = """
             EXISTS (
                 SELECT 1 FROM UNNEST(units) AS unit
-                WHERE unit.character_id = @unit_id
+                WHERE unit.name = @unit_id
                 AND ARRAY_LENGTH(unit.item_names) >= @min_count
                 AND ARRAY_LENGTH(unit.item_names) <= @max_count
             )
