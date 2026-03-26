@@ -28,6 +28,7 @@ PREFIXES_TO_REMOVE = [
     "TFT15_",
     "TFT16_",
     "TFT17_",
+    "TFT18_",
     "TFT_",
 ]
 
@@ -424,7 +425,7 @@ def map_match_data(match_data: Dict, mapping_type: MappingType = "latest") -> Di
 # SUBSET.JSON INITIALIZATION FUNCTIONS
 # =============================================================================
 
-SUBSET_FILE = MODULE_DIR / "subset.json"
+SUBSET_FILE = MODULE_DIR / ".." / "data" / "subset.json"
 
 
 def clean_raw_name(raw_name: str) -> str:
