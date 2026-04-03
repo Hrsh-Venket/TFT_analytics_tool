@@ -3,17 +3,12 @@
 
 class TFTAnalyticsAPI {
     constructor() {
-        // Configure API base URL - update with your project ID
-        this.PROJECT_ID = 'tft-analytics-tool'; 
-        this.REGION = 'asia-southeast1';
-        this.BASE_URL = `https://${this.REGION}-${this.PROJECT_ID}.cloudfunctions.net`;
-
-        // Function endpoints
+        // API endpoints are same-origin (works with any host including Cloudflare tunnel)
         this.endpoints = {
-            stats: `${this.BASE_URL}/api-stats`,
-            clusters: `${this.BASE_URL}/api-clusters`,
-            query: `${this.BASE_URL}/api-query`,
-            clusterDetails: `${this.BASE_URL}/api-cluster-details`
+            stats: '/api/stats',
+            clusters: '/api/clusters',
+            query: '/api/query',
+            clusterDetails: '/api/cluster-details'
         };
     }
 

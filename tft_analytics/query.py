@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-TFT Analytics BigQuery Querying System
+TFT Analytics PostgreSQL Querying System
 
-Production-ready BigQuery-based querying for TFT match data.
-Designed for Firebase webapp integration with comprehensive query capabilities.
+Production-ready PostgreSQL-based querying for TFT match data.
+Uses JSONB columns for nested unit/trait data with jsonb_array_elements for filtering.
 """
 
 import logging
@@ -13,23 +13,15 @@ from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
 from datetime import datetime
 
-# Set up logging
+from psycopg2.extras import RealDictCursor
+
+from tft_analytics.postgres import get_connection, put_connection
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Test for BigQuery availability
-HAS_BIGQUERY = False
-try:
-    from google.cloud import bigquery
-    from google.cloud.exceptions import NotFound
-    HAS_BIGQUERY = True
-    logger.info("BigQuery dependencies available")
-except ImportError:
-    logger.warning("BigQuery dependencies not available - install google-cloud-bigquery")
-    bigquery = None
-
-# Test Mode Configuration
 TEST_MODE = os.getenv('TFT_TEST_MODE', 'false').lower() == 'true'
+
 
 @dataclass
 class DatabaseQueryFilter:
@@ -37,323 +29,183 @@ class DatabaseQueryFilter:
     condition: str
     params: Dict[str, Any]
 
+
 class TFTQuery:
     """
-    BigQuery-based TFT composition query builder for Firebase webapp integration.
-    
+    PostgreSQL-based TFT composition query builder.
+
     Provides flexible querying capabilities with method chaining, logical operations,
-    and comprehensive statistical analysis. Compatible with denormalized BigQuery schema
-    containing match and participant data with nested STRUCT arrays.
-    
+    and comprehensive statistical analysis. Uses JSONB columns for nested array data.
+
     Example Usage:
-        # Basic unit query
         stats = TFTQuery().add_unit('Jinx').get_stats()
-        
-        # Complex logical query
         high_elo = TFTQuery().add_unit('Jinx').add_trait('Sniper', min_tier=3).get_stats()
-        
-        # OR logic
         versatile = TFTQuery().add_unit('Jinx').or_(TFTQuery().add_unit('Aphelios')).get_stats()
-        
-        # Get statistics for Jinx compositions
-        stats = TFTQuery().add_unit('Jinx').get_stats()
     """
-    
-    def __init__(self, project_id: Optional[str] = None, dataset_id: str = 'tft_analytics'):
-        """
-        Initialize the BigQuery TFT query builder.
-        
-        Args:
-            project_id: GCP project ID (auto-detected if None)
-            dataset_id: BigQuery dataset ID
-        """
-        if not HAS_BIGQUERY and not TEST_MODE:
-            raise ImportError("BigQuery dependencies not available. Install google-cloud-bigquery or enable TEST_MODE.")
-        
-        if HAS_BIGQUERY:
-            self.client = bigquery.Client(project=project_id)
-            self.project_id = project_id or self.client.project
-        else:
-            self.client = None
-            self.project_id = project_id or "test-project"
-            
-        self.dataset_id = dataset_id
-        self.table_id = f"{self.project_id}.{self.dataset_id}.match_participants"
-        
-        # Query state
-        self._filters: List[DatabaseQueryFilter] = []
-        
+
+    def __init__(self):
         if TEST_MODE:
-            logger.info("🧪 TFT Query running in TEST MODE")
-    
+            logger.info("TFTQuery running in TEST MODE")
+
+        self._filters: List[DatabaseQueryFilter] = []
+
     def add_unit(self, unit_id: str, must_have: bool = True) -> 'TFTQuery':
         """
         Add filter for presence/absence of a specific unit.
-        
+
         Args:
-            unit_id: Unit character ID (e.g., 'Jinx', 'Aphelios')
+            unit_id: Unit name (e.g., 'Jinx', 'Aphelios')
             must_have: True to require unit presence, False to require absence
-            
-        Returns:
-            Self for method chaining
         """
         if must_have:
             condition = """
                 EXISTS (
-                    SELECT 1 FROM UNNEST(units) AS unit
-                    WHERE unit.name = @unit_id
+                    SELECT 1 FROM jsonb_array_elements(units) AS unit
+                    WHERE unit->>'name' = %(unit_id)s
                 )
             """
         else:
             condition = """
                 NOT EXISTS (
-                    SELECT 1 FROM UNNEST(units) AS unit
-                    WHERE unit.name = @unit_id
+                    SELECT 1 FROM jsonb_array_elements(units) AS unit
+                    WHERE unit->>'name' = %(unit_id)s
                 )
             """
-        
+
         self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id}))
         return self
-    
+
     def add_unit_count(self, unit_id: str, count: int) -> 'TFTQuery':
-        """
-        Add filter for exact unit count of a specific unit type.
-        
-        Args:
-            unit_id: Unit character ID
-            count: Exact number of this unit required
-            
-        Returns:
-            Self for method chaining
-        """
+        """Add filter for exact unit count of a specific unit type."""
         condition = """
-            (SELECT COUNT(*) 
-             FROM UNNEST(units) AS unit
-             WHERE unit.name = @unit_id) = @count
+            (SELECT COUNT(*)
+             FROM jsonb_array_elements(units) AS unit
+             WHERE unit->>'name' = %(unit_id)s) = %(count)s
         """
-        
+
         self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "count": count}))
         return self
-    
+
     def add_unit_star_level(self, unit_id: str, min_star: int = 1, max_star: int = 3) -> 'TFTQuery':
-        """
-        Add filter for unit star level range.
-        
-        Args:
-            unit_id: Unit character ID
-            min_star: Minimum star level (1-3)
-            max_star: Maximum star level (1-3)
-            
-        Returns:
-            Self for method chaining
-        """
+        """Add filter for unit star level range."""
         condition = """
             EXISTS (
-                SELECT 1 FROM UNNEST(units) AS unit
-                WHERE unit.name = @unit_id
-                AND unit.tier >= @min_star
-                AND unit.tier <= @max_star
+                SELECT 1 FROM jsonb_array_elements(units) AS unit
+                WHERE unit->>'name' = %(unit_id)s
+                AND (unit->>'tier')::int >= %(min_star)s
+                AND (unit->>'tier')::int <= %(max_star)s
             )
         """
-        
+
         self._filters.append(DatabaseQueryFilter(condition, {
             "unit_id": unit_id,
             "min_star": min_star,
             "max_star": max_star
         }))
         return self
-    
+
     def add_item_on_unit(self, unit_id: str, item_id: str) -> 'TFTQuery':
         """
         Add filter for specific item on specific unit.
 
         Args:
-            unit_id: Unit character ID
-            item_id: Item name (e.g., 'Infinity_Edge', 'Guinsoos_Rageblade')
-                    Items are stored as clean mapped names from items_mapping.csv
-
-        Returns:
-            Self for method chaining
+            unit_id: Unit name
+            item_id: Item name (e.g., 'Infinity_Edge')
         """
-        # Items are now stored as clean mapped names in BigQuery (e.g., 'Infinity_Edge')
-        # No need for complex regex - just direct string matching
         condition = """
             EXISTS (
-                SELECT 1 FROM UNNEST(units) AS unit
-                CROSS JOIN UNNEST(unit.item_names) AS item
-                WHERE unit.name = @unit_id
-                AND item = @item_id
+                SELECT 1 FROM jsonb_array_elements(units) AS unit
+                CROSS JOIN jsonb_array_elements_text(unit->'item_names') AS item
+                WHERE unit->>'name' = %(unit_id)s
+                AND item = %(item_id)s
             )
         """
 
         self._filters.append(DatabaseQueryFilter(condition, {"unit_id": unit_id, "item_id": item_id}))
         return self
-    
+
     def add_unit_item_count(self, unit_id: str, min_count: int = 0, max_count: int = 3) -> 'TFTQuery':
-        """
-        Add filter for number of items on a specific unit.
-        
-        Args:
-            unit_id: Unit character ID
-            min_count: Minimum number of items
-            max_count: Maximum number of items
-            
-        Returns:
-            Self for method chaining
-        """
+        """Add filter for number of items on a specific unit."""
         condition = """
             EXISTS (
-                SELECT 1 FROM UNNEST(units) AS unit
-                WHERE unit.name = @unit_id
-                AND ARRAY_LENGTH(unit.item_names) >= @min_count
-                AND ARRAY_LENGTH(unit.item_names) <= @max_count
+                SELECT 1 FROM jsonb_array_elements(units) AS unit
+                WHERE unit->>'name' = %(unit_id)s
+                AND jsonb_array_length(unit->'item_names') >= %(min_count)s
+                AND jsonb_array_length(unit->'item_names') <= %(max_count)s
             )
         """
-        
+
         self._filters.append(DatabaseQueryFilter(condition, {
             "unit_id": unit_id,
             "min_count": min_count,
             "max_count": max_count
         }))
         return self
-    
+
     def add_trait(self, trait_name: str, min_tier: int = 1, max_tier: int = 4) -> 'TFTQuery':
-        """
-        Add filter for trait activation level.
-        
-        Args:
-            trait_name: Trait name (e.g., 'Vanguard', 'Star Guardian', 'Sniper')
-            min_tier: Minimum trait tier
-            max_tier: Maximum trait tier
-            
-        Returns:
-            Self for method chaining
-        """
+        """Add filter for trait activation level."""
         condition = """
             EXISTS (
-                SELECT 1 FROM UNNEST(traits) AS trait
-                WHERE trait.name = @trait_name
-                AND trait.tier_current >= @min_tier
-                AND trait.tier_current <= @max_tier
+                SELECT 1 FROM jsonb_array_elements(traits) AS trait
+                WHERE trait->>'name' = %(trait_name)s
+                AND (trait->>'tier_current')::int >= %(min_tier)s
+                AND (trait->>'tier_current')::int <= %(max_tier)s
             )
         """
-        
+
         self._filters.append(DatabaseQueryFilter(condition, {
             "trait_name": trait_name,
             "min_tier": min_tier,
             "max_tier": max_tier
         }))
         return self
-    
+
     def add_player_level(self, min_level: int = 1, max_level: int = 10) -> 'TFTQuery':
-        """
-        Add filter for player level range.
-        
-        Args:
-            min_level: Minimum player level
-            max_level: Maximum player level
-            
-        Returns:
-            Self for method chaining
-        """
-        condition = "level >= @min_level AND level <= @max_level"
+        """Add filter for player level range."""
+        condition = "level >= %(min_level)s AND level <= %(max_level)s"
         self._filters.append(DatabaseQueryFilter(condition, {"min_level": min_level, "max_level": max_level}))
         return self
-    
+
     def add_last_round(self, min_round: int = 1, max_round: int = 50) -> 'TFTQuery':
-        """
-        Add filter for last round survived range.
-        
-        Args:
-            min_round: Minimum last round
-            max_round: Maximum last round
-            
-        Returns:
-            Self for method chaining
-        """
-        condition = "last_round >= @min_round AND last_round <= @max_round"
+        """Add filter for last round survived range."""
+        condition = "last_round >= %(min_round)s AND last_round <= %(max_round)s"
         self._filters.append(DatabaseQueryFilter(condition, {"min_round": min_round, "max_round": max_round}))
         return self
-    
+
     def add_placement_range(self, min_placement: int = 1, max_placement: int = 8) -> 'TFTQuery':
-        """
-        Add filter for placement range.
-        
-        Args:
-            min_placement: Minimum placement (1 = 1st place)
-            max_placement: Maximum placement (8 = 8th place)
-            
-        Returns:
-            Self for method chaining
-        """
-        condition = "placement >= @min_placement AND placement <= @max_placement"
+        """Add filter for placement range."""
+        condition = "placement >= %(min_placement)s AND placement <= %(max_placement)s"
         self._filters.append(DatabaseQueryFilter(condition, {"min_placement": min_placement, "max_placement": max_placement}))
         return self
-    
+
     def add_set_filter(self, set_number: int) -> 'TFTQuery':
-        """
-        Add filter for specific TFT set.
-        
-        Args:
-            set_number: TFT set number (e.g., 14 for Set 14)
-            
-        Returns:
-            Self for method chaining
-        """
-        condition = "tft_set_number = @set_number"
+        """Add filter for specific TFT set."""
+        condition = "tft_set_number = %(set_number)s"
         self._filters.append(DatabaseQueryFilter(condition, {"set_number": set_number}))
         return self
-    
+
     def add_patch_filter(self, patch_version: str) -> 'TFTQuery':
-        """
-        Add filter for specific patch version.
-        
-        Args:
-            patch_version: Patch version string (e.g., '14.23')
-            
-        Returns:
-            Self for method chaining
-        """
-        condition = "game_version LIKE @patch_pattern"
+        """Add filter for specific patch version."""
+        condition = "game_version LIKE %(patch_pattern)s"
         self._filters.append(DatabaseQueryFilter(condition, {"patch_pattern": f"Version {patch_version}%"}))
         return self
-    
+
     def add_custom_filter(self, condition: str, params: Optional[Dict[str, Any]] = None) -> 'TFTQuery':
-        """
-        Add a custom BigQuery SQL filter condition.
-        
-        Args:
-            condition: SQL WHERE condition with parameter placeholders (@param_name)
-            params: Parameters for the condition
-            
-        Returns:
-            Self for method chaining
-        """
+        """Add a custom SQL filter condition with %(param_name)s placeholders."""
         self._filters.append(DatabaseQueryFilter(condition, params or {}))
         return self
-    
+
     def or_(self, *other_queries: 'TFTQuery') -> 'TFTQuery':
-        """
-        Combine this query with other queries using OR logic.
-        
-        Args:
-            other_queries: Other TFTQuery instances to combine with OR
-            
-        Returns:
-            New TFTQuery instance with combined filters
-        """
+        """Combine this query with other queries using OR logic."""
         if not other_queries:
             return self
-        
-        # Create new query instance
-        new_query = TFTQuery(project_id=self.project_id, dataset_id=self.dataset_id)
-        
-        # Combine all filters using OR logic
+
+        new_query = TFTQuery()
+
         if self._filters or any(hasattr(q, '_filters') and q._filters for q in other_queries):
             all_conditions = []
             all_params = {}
-            
-            # Add current query conditions
+
             if self._filters:
                 current_condition_parts = []
                 for f in self._filters:
@@ -361,8 +213,7 @@ class TFTQuery:
                     all_params.update(f.params)
                 if current_condition_parts:
                     all_conditions.append(f"({' AND '.join(current_condition_parts)})")
-            
-            # Add other query conditions with parameter renaming to avoid conflicts
+
             for i, other_query in enumerate(other_queries):
                 if hasattr(other_query, '_filters') and other_query._filters:
                     other_condition_parts = []
@@ -371,35 +222,30 @@ class TFTQuery:
                         for key, value in f.params.items():
                             new_key = f"{key}_or_{i}_{j}"
                             all_params[new_key] = value
-                            renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                            renamed_condition = renamed_condition.replace(
+                                f"%({key})s", f"%({new_key})s"
+                            )
                         other_condition_parts.append(renamed_condition)
                     if other_condition_parts:
                         all_conditions.append(f"({' AND '.join(other_condition_parts)})")
-            
+
             if all_conditions:
                 combined_condition = ' OR '.join(all_conditions)
                 new_query._filters.append(DatabaseQueryFilter(combined_condition, all_params))
-        
+
         return new_query
-    
+
     def not_(self, other_query: Optional['TFTQuery'] = None) -> 'TFTQuery':
         """
         Apply NOT logic to this query or to another query.
-        
-        Args:
-            other_query: Optional other query to negate. If None, negates this query.
-            
-        Returns:
-            New TFTQuery instance with NOT logic applied
-            
-        Usage: 
-            - TFTQuery().not_(TFTQuery().add_unit('Jinx')) = NOT Jinx
-            - TFTQuery().add_trait('Vanguard').not_(TFTQuery().add_unit('Jinx')) = Vanguard AND NOT Jinx
+
+        Usage:
+            TFTQuery().not_(TFTQuery().add_unit('Jinx')) = NOT Jinx
+            TFTQuery().add_trait('Vanguard').not_(TFTQuery().add_unit('Jinx')) = Vanguard AND NOT Jinx
         """
-        new_query = TFTQuery(project_id=self.project_id, dataset_id=self.dataset_id)
-        
+        new_query = TFTQuery()
+
         if other_query is None:
-            # NOT this query
             if self._filters:
                 current_conditions = []
                 all_params = {}
@@ -409,30 +255,28 @@ class TFTQuery:
                 combined_condition = f"NOT ({' AND '.join(current_conditions)})"
                 new_query._filters.append(DatabaseQueryFilter(combined_condition, all_params))
         else:
-            # This query AND NOT other_query
             all_params = {}
-            
-            # Add current query conditions
+
             current_conditions = []
             for f in self._filters:
                 current_conditions.append(f.condition)
                 all_params.update(f.params)
-            
-            # Add NOT other_query conditions
+
             if hasattr(other_query, '_filters') and other_query._filters:
                 other_conditions = []
                 for f in other_query._filters:
-                    # Rename conflicting parameters
                     renamed_condition = f.condition
                     for key, value in f.params.items():
                         if key in all_params:
                             new_key = f"{key}_not_{id(f)}"
                             all_params[new_key] = value
-                            renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                            renamed_condition = renamed_condition.replace(
+                                f"%({key})s", f"%({new_key})s"
+                            )
                         else:
                             all_params[key] = value
                     other_conditions.append(renamed_condition)
-                
+
                 if current_conditions and other_conditions:
                     combined_condition = f"({' AND '.join(current_conditions)}) AND NOT ({' AND '.join(other_conditions)})"
                 elif current_conditions:
@@ -440,97 +284,73 @@ class TFTQuery:
                 elif other_conditions:
                     combined_condition = f"NOT ({' AND '.join(other_conditions)})"
                 else:
-                    combined_condition = "TRUE"  # Always true if no conditions
-                
+                    combined_condition = "TRUE"
+
                 new_query._filters.append(DatabaseQueryFilter(combined_condition, all_params))
-        
+
         return new_query
-    
+
     def xor(self, other_query: 'TFTQuery') -> 'TFTQuery':
-        """
-        Combine this query with another query using XOR logic (exactly one condition true).
-        
-        Args:
-            other_query: Other TFTQuery instance for XOR logic
-            
-        Returns:
-            New TFTQuery instance with XOR logic applied
-            
-        Usage: 
-            TFTQuery().add_unit('Jinx').xor(TFTQuery().add_unit('Aphelios'))
-        """
-        new_query = TFTQuery(project_id=self.project_id, dataset_id=self.dataset_id)
-        
+        """Combine this query with another using XOR logic (exactly one condition true)."""
+        new_query = TFTQuery()
+
         if hasattr(other_query, '_filters'):
             all_params = {}
-            
-            # XOR: (A AND NOT B) OR (NOT A AND B)
-            # Each condition appears twice, so we need unique parameters for each occurrence
-            
-            # First occurrence - get current query conditions (A)
+
             current_conditions_a1 = []
             for i, f in enumerate(self._filters):
                 renamed_condition = f.condition
                 for key, value in f.params.items():
                     new_key = f"{key}_a1_{i}"
                     all_params[new_key] = value
-                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                    renamed_condition = renamed_condition.replace(f"%({key})s", f"%({new_key})s")
                 current_conditions_a1.append(renamed_condition)
-            
-            # First occurrence - get other query conditions (B)
+
             other_conditions_b1 = []
             for i, f in enumerate(other_query._filters):
                 renamed_condition = f.condition
                 for key, value in f.params.items():
                     new_key = f"{key}_b1_{i}"
                     all_params[new_key] = value
-                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                    renamed_condition = renamed_condition.replace(f"%({key})s", f"%({new_key})s")
                 other_conditions_b1.append(renamed_condition)
-            
-            # Second occurrence - get current query conditions (for NOT A)
+
             current_conditions_a2 = []
             for i, f in enumerate(self._filters):
                 renamed_condition = f.condition
                 for key, value in f.params.items():
                     new_key = f"{key}_a2_{i}"
                     all_params[new_key] = value
-                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                    renamed_condition = renamed_condition.replace(f"%({key})s", f"%({new_key})s")
                 current_conditions_a2.append(renamed_condition)
-            
-            # Second occurrence - get other query conditions (B)
+
             other_conditions_b2 = []
             for i, f in enumerate(other_query._filters):
                 renamed_condition = f.condition
                 for key, value in f.params.items():
                     new_key = f"{key}_b2_{i}"
                     all_params[new_key] = value
-                    renamed_condition = renamed_condition.replace(f"@{key}", f"@{new_key}")
+                    renamed_condition = renamed_condition.replace(f"%({key})s", f"%({new_key})s")
                 other_conditions_b2.append(renamed_condition)
-            
-            # XOR: (A AND NOT B) OR (NOT A AND B)
+
             if current_conditions_a1 and other_conditions_b1:
                 current_clause_a1 = ' AND '.join(current_conditions_a1)
                 other_clause_b1 = ' AND '.join(other_conditions_b1)
                 current_clause_a2 = ' AND '.join(current_conditions_a2)
                 other_clause_b2 = ' AND '.join(other_conditions_b2)
-                
-                xor_condition = f"(({current_clause_a1}) AND NOT ({other_clause_b1})) OR (NOT ({current_clause_a2}) AND ({other_clause_b2}))"
+
+                xor_condition = (
+                    f"(({current_clause_a1}) AND NOT ({other_clause_b1})) OR "
+                    f"(NOT ({current_clause_a2}) AND ({other_clause_b2}))"
+                )
                 new_query._filters.append(DatabaseQueryFilter(xor_condition, all_params))
-        
+
         return new_query
-    
+
     def _build_sql_query(self, limit: Optional[int] = None) -> tuple[str, Dict[str, Any]]:
-        """
-        Build the complete BigQuery SQL query with all filters.
-        
-        Args:
-            limit: Optional limit on number of results
-            
-        Returns:
-            Tuple of (SQL query string, parameters dict)
-        """
-        base_query = f"""
-            SELECT 
+        """Build the complete PostgreSQL query with all filters."""
+        base_query = """
+            SELECT
                 match_id,
                 puuid,
                 riot_id_game_name,
@@ -551,78 +371,51 @@ class TFTQuery:
                 tft_set_number,
                 tft_set_core_name,
                 tft_game_type
-            FROM `{self.table_id}`
+            FROM match_participants
             WHERE 1=1
         """
-        
+
         all_params = {}
-        
-        # Add all filters
+
         for filter_obj in self._filters:
             base_query += f" AND ({filter_obj.condition})"
             all_params.update(filter_obj.params)
-        
-        # Add ordering
+
         base_query += " ORDER BY placement ASC, game_datetime DESC"
-        
-        # Add limit if specified
+
         if limit:
             base_query += f" LIMIT {limit}"
-        
+
         return base_query, all_params
-    
+
     def execute(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Execute the query and return matching participants.
-        
-        Args:
-            limit: Optional limit on number of results
-            
-        Returns:
-            List of participant dictionaries
-        """
+        """Execute the query and return matching participants."""
         if TEST_MODE:
             return self._execute_test_mode(limit)
-        
+
+        conn = get_connection()
         try:
             query, params = self._build_sql_query(limit)
-            
-            # Configure query job with parameters
-            job_config = bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter(
-                        key, 
-                        "STRING" if isinstance(value, str) else "FLOAT64" if isinstance(value, float) else "INTEGER", 
-                        value
-                    )
-                    for key, value in params.items()
-                ]
-            )
-            
-            # Execute query
-            query_job = self.client.query(query, job_config=job_config)
-            results = query_job.result()
-            
-            # Convert to list of dictionaries
-            participants = []
-            for row in results:
-                participant = dict(row)
-                participants.append(participant)
-            
-            logger.info(f"Query executed successfully, returned {len(participants)} participants")
+
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, params)
+                participants = [dict(row) for row in cur.fetchall()]
+
+            logger.info(f"Query returned {len(participants)} participants")
             return participants
-            
+
         except Exception as e:
-            logger.error(f"BigQuery query failed: {e}")
+            logger.error(f"Query failed: {e}")
             if TEST_MODE:
                 return self._execute_test_mode(limit)
             raise
-    
+        finally:
+            put_connection(conn)
+
     def _execute_test_mode(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Execute query in test mode with sample data."""
-        logger.info("🧪 Executing query in test mode with sample data")
-        
-        # Return sample data that matches the expected structure
+        logger.info("Executing query in test mode with sample data")
+
         sample_data = [
             {
                 "match_id": "NA1_TEST_001",
@@ -669,110 +462,79 @@ class TFTQuery:
                 "tft_set_number": 14
             }
         ]
-        
-        # Apply limit if specified
+
         if limit:
             sample_data = sample_data[:limit]
-        
+
         return sample_data
-    
+
     def get_stats(self) -> Optional[Dict[str, Any]]:
-        """
-        Execute the query and return statistical summary.
-        
-        Returns:
-            Dictionary with play_count, avg_placement, winrate, top4_rate
-        """
+        """Execute the query and return statistical summary."""
         participants = self.execute()
         if not participants:
             return None
-        
+
         count = len(participants)
         avg_place = sum(p['placement'] for p in participants) / count
         winrate = (sum(1 for p in participants if p['placement'] == 1) / count) * 100
         top4_rate = (sum(1 for p in participants if p['placement'] <= 4) / count) * 100
-        
+
         return {
             'play_count': count,
             'avg_placement': round(avg_place, 2),
             'winrate': round(winrate, 2),
             'top4_rate': round(top4_rate, 2)
         }
-    
 
-# Compatibility aliases for existing code
+
 TFTQueryBigQuery = TFTQuery
 
+
 def test_connection() -> Dict[str, Any]:
-    """
-    Test BigQuery connection and system status.
-    
-    Returns:
-        Dictionary with connection status and basic information
-    """
+    """Test PostgreSQL connection and system status."""
     try:
-        if not HAS_BIGQUERY:
-            if TEST_MODE:
-                # In test mode, simulate successful connection
-                return {
-                    'success': True,
-                    'message': 'Test mode - BigQuery simulation active',
-                    'test_results_count': 2,
-                    'project_id': 'test-project',
-                    'dataset_id': 'tft_analytics',
-                    'table_id': 'test-project.tft_analytics.match_participants'
-                }
-            else:
-                return {
-                    'success': False,
-                    'error': 'BigQuery dependencies not available',
-                    'message': 'Install google-cloud-bigquery'
-                }
-        
+        if TEST_MODE:
+            return {
+                'success': True,
+                'message': 'Test mode - PostgreSQL simulation active',
+                'test_results_count': 2,
+            }
+
         query = TFTQuery()
-        test_results = query.add_custom_filter("RAND() < 0.001").execute(limit=1)  # Tiny sample
-        
+        test_results = query.add_custom_filter("random() < 0.001").execute(limit=1)
+
         return {
             'success': True,
-            'message': 'BigQuery connection successful',
+            'message': 'PostgreSQL connection successful',
             'test_results_count': len(test_results),
-            'project_id': query.project_id,
-            'dataset_id': query.dataset_id,
-            'table_id': query.table_id
         }
-        
+
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'message': 'BigQuery connection failed'
+            'message': 'PostgreSQL connection failed'
         }
+
 
 def main():
     """Main function for testing the querying system."""
-    print("TFT Analytics BigQuery Querying System")
+    print("TFT Analytics PostgreSQL Querying System")
     print("=" * 50)
-    
-    # Test connection
-    print("Testing BigQuery connection...")
+
+    print("Testing PostgreSQL connection...")
     connection_result = test_connection()
-    
+
     if connection_result['success']:
-        print("[SUCCESS] BigQuery connection successful")
-        print(f"   Project: {connection_result['project_id']}")
-        print(f"   Dataset: {connection_result['dataset_id']}")
-        print(f"   Test query returned: {connection_result['test_results_count']} results")
+        print(f"[SUCCESS] {connection_result['message']}")
     else:
-        print("[ERROR] BigQuery connection failed")
-        print(f"   Error: {connection_result['error']}")
-        # Don't return - continue with test mode if available
+        print(f"[ERROR] {connection_result['message']}")
         if not TEST_MODE:
-            print("   Enable test mode with: set TFT_TEST_MODE=true")
+            print("   Enable test mode with: export TFT_TEST_MODE=true")
             return
-    
+
     print("\nTesting query functionality...")
-    
-    # Test basic query
+
     print("\n1. Basic query test...")
     try:
         query = TFTQuery()
@@ -787,52 +549,31 @@ def main():
             print("[INFO] No results found")
     except Exception as e:
         print(f"[ERROR] Basic query failed: {e}")
-    
-    # Test unit query
+
     print("\n2. Unit query test...")
     try:
-        unit_query = TFTQuery().add_unit('Jinx')
-        jinx_stats = unit_query.get_stats()
+        jinx_stats = TFTQuery().add_unit('Jinx').get_stats()
         if jinx_stats and jinx_stats['play_count'] > 0:
-            print(f"[SUCCESS] Jinx query successful:")
-            print(f"   Play count: {jinx_stats['play_count']}")
-            print(f"   Average placement: {jinx_stats['avg_placement']}")
-            print(f"   Win rate: {jinx_stats['winrate']}%")
+            print(f"[SUCCESS] Jinx query: {jinx_stats['play_count']} games, "
+                  f"avg placement {jinx_stats['avg_placement']}")
         else:
-            print("[INFO] No Jinx results found - this is normal if using different unit names")
+            print("[INFO] No Jinx results found")
     except Exception as e:
         print(f"[ERROR] Unit query failed: {e}")
-    
-    # Test logical operations
-    print("\n3. Logical operations test...")
+
+    print("\n3. OR query test...")
     try:
-        or_query = TFTQuery().add_unit('Jinx').or_(TFTQuery().add_unit('Aphelios'))
-        or_stats = or_query.get_stats()
+        or_stats = TFTQuery().add_unit('Jinx').or_(TFTQuery().add_unit('Aphelios')).get_stats()
         if or_stats:
-            print(f"[SUCCESS] OR query (Jinx OR Aphelios) successful:")
-            print(f"   Play count: {or_stats['play_count']}")
-            print(f"   Average placement: {or_stats['avg_placement']}")
+            print(f"[SUCCESS] Jinx OR Aphelios: {or_stats['play_count']} games")
         else:
             print("[INFO] No OR query results found")
     except Exception as e:
         print(f"[ERROR] OR query failed: {e}")
-    
+
     print("\n" + "=" * 50)
-    print("[SUCCESS] Query system test completed!")
-    print("\nExample usage for Firebase webapp:")
-    print("```python")
-    print("from querying import TFTQuery")
-    print("")
-    print("# Get Jinx statistics")
-    print("stats = TFTQuery().add_unit('Jinx').get_stats()")
-    print("")
-    print("# Get high-level Aphelios statistics")
-    print("stats = TFTQuery().add_unit('Aphelios').add_player_level(min_level=8).get_stats()")
-    print("")
-    print("# Complex logical query")
-    print("versatile = TFTQuery().add_unit('Jinx').or_(TFTQuery().add_unit('Aphelios')).add_trait('Sniper', min_tier=2)")
-    print("results = versatile.get_stats()")
-    print("```")
+    print("[DONE] Query system test completed!")
+
 
 if __name__ == "__main__":
     main()

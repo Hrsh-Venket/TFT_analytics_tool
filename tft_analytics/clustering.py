@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-TFT BigQuery-Based Clustering System
+TFT Clustering System
 
-Production-ready BigQuery-based hierarchical clustering for TFT compositions.
-Designed for Firebase webapp integration with comprehensive cluster analysis.
+Two-level hierarchical clustering for TFT compositions.
+Uses PostgreSQL for data storage.
 
 Two-Level Clustering:
 1. Sub-clusters: Exact carry matching for precise compositions
@@ -22,6 +22,10 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Set, FrozenSet, Tuple, Optional, Any, Union
 from datetime import datetime
 
+from psycopg2.extras import RealDictCursor, execute_values
+
+from tft_analytics.postgres import get_connection, put_connection
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,22 +39,9 @@ except ImportError:
     logger.warning("scikit-learn not available - clustering will use simplified mode")
     AgglomerativeClustering = None
 
-# Test for BigQuery availability
-HAS_BIGQUERY = False
-try:
-    from google.cloud import bigquery
-    from google.cloud.exceptions import NotFound
-    HAS_BIGQUERY = True
-    logger.info("BigQuery dependencies available")
-except ImportError:
-    logger.warning("BigQuery dependencies not available - install google-cloud-bigquery")
-    bigquery = None
-    NotFound = Exception  # Fallback for test mode
-
 # Test Mode Configuration
 TEST_MODE_ENV = os.getenv('TFT_TEST_MODE', 'false')
 TEST_MODE = TEST_MODE_ENV.lower() == 'true'
-print(f"🔍 Environment Debug: TFT_TEST_MODE='{TEST_MODE_ENV}', TEST_MODE={TEST_MODE}, HAS_BIGQUERY={HAS_BIGQUERY}")
 
 # Clustering Configuration
 CARRY_FREQUENCY_THRESHOLD = 0.75  # Minimum frequency for carries to be shown in main cluster names
@@ -103,77 +94,36 @@ class MainCluster:
 
 class TFTClusteringEngine:
     """
-    BigQuery-based two-level clustering engine for TFT compositions.
-    
+    Two-level clustering engine for TFT compositions.
+
     Level 1: Sub-clusters based on exact carry matching
     Level 2: Main clusters grouping sub-clusters with 2-3 common carries
-    
-    Designed for Firebase webapp integration with comprehensive analysis capabilities.
     """
-    
+
     def __init__(self,
-                 project_id: Optional[str] = None,
-                 dataset_id: str = 'tft_analytics',
-                 cluster_dataset_id: str = 'tft_clusters',
                  min_sub_cluster_size: int = 5,
                  min_main_cluster_size: int = 3):
         """
-        Initialize the BigQuery TFT clustering engine.
+        Initialize the TFT clustering engine.
 
         Args:
-            project_id: GCP project ID (auto-detected if None)
-            dataset_id: BigQuery dataset ID for match data
-            cluster_dataset_id: BigQuery dataset ID for cluster results
             min_sub_cluster_size: Minimum size for valid sub-clusters
             min_main_cluster_size: Minimum size for valid main clusters
         """
-        if not HAS_BIGQUERY and not TEST_MODE:
-            raise ImportError("BigQuery dependencies not available. Install google-cloud-bigquery or enable TEST_MODE.")
-        
-        if HAS_BIGQUERY:
-            self.client = bigquery.Client(project=project_id)
-            self.project_id = project_id or self.client.project
-        else:
-            self.client = None
-            self.project_id = project_id or "test-project"
-        
-        self.dataset_id = dataset_id
-        self.cluster_dataset_id = cluster_dataset_id
-        self.table_id = f"{self.project_id}.{self.dataset_id}.match_participants"
-
-        # Ensure cluster dataset exists
-        self.create_cluster_dataset_if_not_exists()
-        
         # Clustering parameters
         self.min_sub_cluster_size = min_sub_cluster_size
         self.min_main_cluster_size = min_main_cluster_size
-        
+
         # Clustering state
         self.compositions: List[Composition] = []
         self.sub_clusters: List[SubCluster] = []
         self.main_clusters: List[MainCluster] = []
         self.main_cluster_assignments: Dict[int, int] = {}
-        
+
         if TEST_MODE:
-            logger.info("🧪 TFT Clustering running in TEST MODE")
+            logger.info("TFT Clustering running in TEST MODE")
         else:
-            logger.info("🔥 TFT Clustering running in PRODUCTION MODE - using full BigQuery dataset")
-
-    def create_cluster_dataset_if_not_exists(self):
-        """Create BigQuery cluster dataset if it doesn't exist"""
-        if not HAS_BIGQUERY or TEST_MODE:
-            return
-
-        dataset_ref = self.client.dataset(self.cluster_dataset_id)
-        try:
-            self.client.get_dataset(dataset_ref)
-            logger.info(f"Cluster dataset {self.cluster_dataset_id} already exists")
-        except NotFound:
-            dataset = bigquery.Dataset(dataset_ref)
-            dataset.location = "US"  # Always Free tier location
-            dataset.description = "TFT clustering analysis results and computed cluster data"
-            self.client.create_dataset(dataset)
-            logger.info(f"✅ Created cluster dataset {self.cluster_dataset_id}")
+            logger.info("TFT Clustering running in PRODUCTION MODE")
     
     def extract_carry_units(self, participant: dict) -> FrozenSet[str]:
         """
@@ -194,29 +144,21 @@ class TFTClusteringEngine:
         
         return carry_units
     
-    def load_compositions_from_bigquery(self,
-                                        filters: Optional[Dict[str, Any]] = None,
-                                        limit: Optional[int] = None) -> None:
-        """Load and process compositions from BigQuery database."""
+    def load_compositions(self,
+                          filters: Optional[Dict[str, Any]] = None,
+                          limit: Optional[int] = None) -> None:
+        """Load and process compositions from PostgreSQL database."""
         if TEST_MODE:
-            logger.info("🧪 Loading TEST compositions (mock data)...")
+            logger.info("Loading TEST compositions (mock data)...")
             self._load_test_compositions(limit or 1000)
             return
 
-        logger.info("🔥 Loading compositions from PRODUCTION BigQuery...")
-        if limit:
-            logger.info(f"   Limited to {limit} compositions for testing")
-        else:
-            logger.info("   Processing FULL BigQuery dataset (no limit)")
+        logger.info("Loading compositions from database...")
 
-        logger.info(f"   Project: {self.project_id}")
-        logger.info(f"   Dataset: {self.dataset_id}")
-        logger.info(f"   Table: {self.table_id}")
-        
+        conn = get_connection()
         try:
-            # Build base query
-            query = f"""
-                SELECT 
+            query = """
+                SELECT
                     match_id,
                     puuid,
                     riot_id_game_name,
@@ -228,56 +170,40 @@ class TFTClusteringEngine:
                     traits,
                     game_datetime,
                     tft_set_number
-                FROM `{self.table_id}`
+                FROM match_participants
                 WHERE 1=1
             """
-            
+
             query_params = {}
-            
-            # Apply filters
+
             if filters:
                 if 'set_number' in filters:
-                    query += " AND tft_set_number = @set_number"
+                    query += " AND tft_set_number = %(set_number)s"
                     query_params['set_number'] = filters['set_number']
-                
+
                 if 'date_from' in filters:
-                    query += " AND DATE(game_datetime) >= @date_from"
+                    query += " AND game_datetime::date >= %(date_from)s"
                     query_params['date_from'] = filters['date_from']
-                
+
                 if 'date_to' in filters:
-                    query += " AND DATE(game_datetime) <= @date_to" 
+                    query += " AND game_datetime::date <= %(date_to)s"
                     query_params['date_to'] = filters['date_to']
-                
+
                 if 'placement_range' in filters:
                     min_place, max_place = filters['placement_range']
-                    query += " AND placement >= @min_placement AND placement <= @max_placement"
+                    query += " AND placement >= %(min_placement)s AND placement <= %(max_placement)s"
                     query_params['min_placement'] = min_place
                     query_params['max_placement'] = max_place
-            
-            # Add limit
+
             if limit:
                 query += f" LIMIT {limit}"
-            
-            # Configure query job with parameters
-            job_config = bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter(
-                        key, 
-                        "DATE" if key.startswith('date_') else "STRING" if isinstance(value, str) else "INTEGER", 
-                        value
-                    )
-                    for key, value in query_params.items()
-                ]
-            )
-            
-            # Execute query
-            query_job = self.client.query(query, job_config=job_config)
-            results = query_job.result()
-            
-            # Process results into compositions
+
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query, query_params)
+                results = cur.fetchall()
+
             compositions = []
             for row in results:
-                # Extract participant data
                 participant_data = {
                     'placement': row['placement'],
                     'level': row['level'],
@@ -285,11 +211,9 @@ class TFTClusteringEngine:
                     'units': row['units'] if row['units'] else [],
                     'traits': row['traits'] if row['traits'] else []
                 }
-                
-                # Extract carries
+
                 carries = self.extract_carry_units(participant_data)
-                
-                # Create composition
+
                 riot_id = f"{row['riot_id_game_name'] or ''}#{row['riot_id_tagline'] or ''}"
                 comp = Composition(
                     match_id=row['match_id'],
@@ -302,16 +226,18 @@ class TFTClusteringEngine:
                     participant_data=participant_data
                 )
                 compositions.append(comp)
-            
+
             self.compositions = compositions
-            logger.info(f"Loaded {len(self.compositions)} compositions from BigQuery")
-            
+            logger.info(f"Loaded {len(self.compositions)} compositions")
+
         except Exception as e:
-            logger.error(f"Error loading compositions from BigQuery: {e}")
+            logger.error(f"Error loading compositions: {e}")
             if TEST_MODE:
                 self._load_test_compositions(limit or 1000)
             else:
                 raise
+        finally:
+            put_connection(conn)
     
     def _load_test_compositions(self, count: int) -> None:
         """Load test compositions for development/testing."""
@@ -804,138 +730,94 @@ class TFTClusteringEngine:
 
         return None
 
-    def save_clusters_to_bigquery(self) -> bool:
+    def save_clusters(self) -> bool:
         """
-        Save clustering results to BigQuery tables.
-        Creates main_clusters and sub_clusters tables and inserts the data.
+        Save clustering results to PostgreSQL tables.
+        Truncates existing data and inserts fresh results.
 
         Returns:
             True if successful, False otherwise
         """
-        if not HAS_BIGQUERY or TEST_MODE:
-            logger.warning("Cannot save to BigQuery: dependencies unavailable or test mode active")
+        if TEST_MODE:
+            logger.warning("Cannot save clusters in test mode")
             return False
 
+        conn = get_connection()
         try:
-            logger.info("Creating cluster tables in BigQuery...")
-
-            # Create main_clusters table
-            main_clusters_schema = [
-                bigquery.SchemaField("id", "INTEGER", mode="REQUIRED"),
-                bigquery.SchemaField("size", "INTEGER", mode="REQUIRED"),
-                bigquery.SchemaField("avg_placement", "FLOAT64", mode="NULLABLE"),
-                bigquery.SchemaField("winrate", "FLOAT64", mode="NULLABLE"),
-                bigquery.SchemaField("top4_rate", "FLOAT64", mode="NULLABLE"),
-                bigquery.SchemaField("common_carries", "STRING", mode="REPEATED"),
-                bigquery.SchemaField("top_units_display", "STRING", mode="NULLABLE"),
-                bigquery.SchemaField("sub_cluster_ids", "INTEGER", mode="REPEATED"),
-                bigquery.SchemaField("analysis_date", "TIMESTAMP", mode="NULLABLE")
-            ]
-
-            main_table_id = f"{self.project_id}.{self.cluster_dataset_id}.main_clusters"
-            main_table = bigquery.Table(main_table_id, schema=main_clusters_schema)
-
-            # Create sub_clusters table
-            sub_clusters_schema = [
-                bigquery.SchemaField("id", "INTEGER", mode="REQUIRED"),
-                bigquery.SchemaField("carry_set", "STRING", mode="REPEATED"),
-                bigquery.SchemaField("size", "INTEGER", mode="REQUIRED"),
-                bigquery.SchemaField("avg_placement", "FLOAT64", mode="NULLABLE"),
-                bigquery.SchemaField("winrate", "FLOAT64", mode="NULLABLE"),
-                bigquery.SchemaField("top4_rate", "FLOAT64", mode="NULLABLE"),
-                bigquery.SchemaField("analysis_date", "TIMESTAMP", mode="NULLABLE")
-            ]
-
-            sub_table_id = f"{self.project_id}.{self.cluster_dataset_id}.sub_clusters"
-            sub_table = bigquery.Table(sub_table_id, schema=sub_clusters_schema)
-
-            # Create tables (delete existing first to avoid conflicts)
-            try:
-                self.client.delete_table(main_table_id)
-                logger.info("Deleted existing main_clusters table")
-            except NotFound:
-                pass
-
-            try:
-                self.client.delete_table(sub_table_id)
-                logger.info("Deleted existing sub_clusters table")
-            except NotFound:
-                pass
-
-            # Create new tables
-            self.client.create_table(main_table)
-            self.client.create_table(sub_table)
-            logger.info("Created cluster tables successfully")
-
-            # Prepare data for insertion
             current_time = datetime.now().isoformat()
 
-            # Insert main clusters
-            if self.main_clusters:
-                main_rows = []
-                for cluster in self.main_clusters:
-                    main_rows.append({
-                        'id': int(cluster.id),
-                        'size': int(cluster.size),
-                        'avg_placement': float(cluster.avg_placement) if cluster.avg_placement else None,
-                        'winrate': float(cluster.winrate) if cluster.winrate else None,
-                        'top4_rate': float(cluster.top4_rate) if cluster.top4_rate else None,
-                        'common_carries': cluster.common_carries,
-                        'top_units_display': cluster.top_units_display,
-                        'sub_cluster_ids': [int(x) for x in cluster.sub_cluster_ids],
-                        'analysis_date': current_time
-                    })
+            with conn.cursor() as cur:
+                # Clear old data (sub_clusters first due to FK)
+                cur.execute("TRUNCATE sub_clusters CASCADE")
+                cur.execute("TRUNCATE main_clusters CASCADE")
 
-                main_table_ref = self.client.get_table(main_table_id)
-                errors = self.client.insert_rows_json(main_table_ref, main_rows)
-                if errors:
-                    logger.error(f"Main clusters insert errors: {errors}")
-                    return False
-                logger.info(f"Inserted {len(main_rows)} main clusters")
+                # Insert main clusters
+                if self.main_clusters:
+                    main_rows = [
+                        (
+                            int(c.id),
+                            int(c.size),
+                            float(c.avg_placement) if c.avg_placement else None,
+                            float(c.winrate) if c.winrate else None,
+                            float(c.top4_rate) if c.top4_rate else None,
+                            c.common_carries,
+                            c.top_units_display,
+                            [int(x) for x in c.sub_cluster_ids],
+                            current_time
+                        )
+                        for c in self.main_clusters
+                    ]
+                    execute_values(cur, """
+                        INSERT INTO main_clusters
+                            (id, size, avg_placement, winrate, top4_rate,
+                             common_carries, top_units_display, sub_cluster_ids, analysis_date)
+                        VALUES %s
+                    """, main_rows)
+                    logger.info(f"Inserted {len(main_rows)} main clusters")
 
-            # Insert sub clusters
-            if self.sub_clusters:
-                sub_rows = []
-                for cluster in self.sub_clusters:
-                    sub_rows.append({
-                        'id': cluster.id,
-                        'carry_set': list(cluster.carry_set),
-                        'size': cluster.size,
-                        'avg_placement': cluster.avg_placement,
-                        'winrate': cluster.winrate,
-                        'top4_rate': cluster.top4_rate,
-                        'analysis_date': current_time
-                    })
+                # Insert sub clusters (with main_cluster_id)
+                if self.sub_clusters:
+                    sub_rows = [
+                        (
+                            c.id,
+                            self.main_cluster_assignments.get(c.id),
+                            list(c.carry_set),
+                            c.size,
+                            c.avg_placement,
+                            c.winrate,
+                            c.top4_rate,
+                            current_time
+                        )
+                        for c in self.sub_clusters
+                    ]
+                    execute_values(cur, """
+                        INSERT INTO sub_clusters
+                            (id, main_cluster_id, carry_set, size,
+                             avg_placement, winrate, top4_rate, analysis_date)
+                        VALUES %s
+                    """, sub_rows)
+                    logger.info(f"Inserted {len(sub_rows)} sub clusters")
 
-                sub_table_ref = self.client.get_table(sub_table_id)
-                errors = self.client.insert_rows_json(sub_table_ref, sub_rows)
-                if errors:
-                    logger.error(f"Sub clusters insert errors: {errors}")
-                    return False
-                logger.info(f"Inserted {len(sub_rows)} sub clusters")
-
-            logger.info("✅ Successfully saved clustering results to BigQuery")
+            conn.commit()
+            logger.info("Successfully saved clustering results")
             return True
 
         except Exception as e:
-            logger.error(f"Error saving clusters to BigQuery: {e}")
+            conn.rollback()
+            logger.error(f"Error saving clusters: {e}")
             return False
+        finally:
+            put_connection(conn)
 
 
-def run_clustering_analysis(project_id: Optional[str] = None,
-                          dataset_id: str = 'tft_analytics',
-                          cluster_dataset_id: str = 'tft_clusters',
-                          filters: Optional[Dict[str, Any]] = None,
+def run_clustering_analysis(filters: Optional[Dict[str, Any]] = None,
                           min_sub_cluster_size: int = 5,
                           min_main_cluster_size: int = 3,
                           limit: Optional[int] = None) -> Dict[str, Any]:
     """
-    Run complete clustering analysis on BigQuery data.
+    Run complete clustering analysis.
 
     Args:
-        project_id: GCP project ID (auto-detected if None)
-        dataset_id: BigQuery dataset ID for match data
-        cluster_dataset_id: BigQuery dataset ID for cluster results
         filters: Optional filters for data selection
         min_sub_cluster_size: Minimum size for valid sub-clusters
         min_main_cluster_size: Minimum size for valid main clusters
@@ -944,102 +826,70 @@ def run_clustering_analysis(project_id: Optional[str] = None,
     Returns:
         Dictionary with clustering results and statistics
     """
-    logger.info("Starting TFT BigQuery Clustering Analysis")
+    logger.info("Starting TFT Clustering Analysis")
     logger.info("=" * 50)
-    
-    # Initialize clustering engine
+
     engine = TFTClusteringEngine(
-        project_id=project_id,
-        dataset_id=dataset_id,
-        cluster_dataset_id=cluster_dataset_id,
         min_sub_cluster_size=min_sub_cluster_size,
         min_main_cluster_size=min_main_cluster_size
     )
-    
+
     try:
-        # Execute clustering pipeline
-        engine.load_compositions_from_bigquery(filters=filters, limit=limit)
+        engine.load_compositions(filters=filters, limit=limit)
         engine.create_sub_clusters()
         engine.create_main_clusters()
-        
-        # Generate statistics
+
         stats = engine.get_clustering_statistics()
 
-        # Save clusters to BigQuery tables
-        save_success = engine.save_clusters_to_bigquery()
+        save_success = engine.save_clusters()
         if not save_success:
-            logger.warning("Failed to save clusters to BigQuery - results available in memory only")
+            logger.warning("Failed to save clusters - results available in memory only")
 
-        # Get cluster summaries
         main_cluster_summary = engine.get_cluster_summary('main', top_n=10)
         sub_cluster_summary = engine.get_cluster_summary('sub', top_n=20)
-        
-        # Compile results
+
         results = {
             'statistics': stats,
             'main_clusters': main_cluster_summary,
             'sub_clusters': sub_cluster_summary,
-            'engine': engine  # Include engine for further analysis
+            'engine': engine
         }
-        
-        # Print summary
-        logger.info("\nClustering Results Summary:")
+
+        logger.info(f"\nClustering Results Summary:")
         logger.info(f"Total compositions: {stats['total_compositions']}")
         logger.info(f"Sub-clusters: {stats['sub_clusters']['count']} (avg size: {stats['sub_clusters']['avg_size']})")
         logger.info(f"Main clusters: {stats['main_clusters']['count']} (avg size: {stats['main_clusters']['avg_size']})")
-        logger.info(f"Sub-cluster coverage: {stats['sub_clusters']['coverage']}%")
-        logger.info(f"Main cluster coverage: {stats['main_clusters']['coverage']}%")
-        
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Error in clustering analysis: {e}")
         raise
 
 
 def test_connection() -> Dict[str, Any]:
-    """
-    Test BigQuery connection and clustering system status.
-    
-    Returns:
-        Dictionary with connection status and basic information
-    """
+    """Test PostgreSQL connection and clustering system status."""
     try:
-        if not HAS_BIGQUERY:
-            if TEST_MODE:
-                # In test mode, simulate successful connection
-                return {
-                    'success': True,
-                    'message': 'Test mode - BigQuery clustering simulation active',
-                    'project_id': 'test-project',
-                    'dataset_id': 'tft_analytics',
-                    'table_id': 'test-project.tft_analytics.match_participants'
-                }
-            else:
-                return {
-                    'success': False,
-                    'error': 'BigQuery dependencies not available',
-                    'message': 'Install google-cloud-bigquery'
-                }
-        
-        # Test with small sample
+        if TEST_MODE:
+            return {
+                'success': True,
+                'message': 'Test mode - clustering simulation active',
+            }
+
         engine = TFTClusteringEngine()
-        engine.load_compositions_from_bigquery(limit=10)
-        
+        engine.load_compositions(limit=10)
+
         return {
             'success': True,
-            'message': 'BigQuery clustering connection successful',
+            'message': 'Clustering connection successful',
             'compositions_loaded': len(engine.compositions),
-            'project_id': engine.project_id,
-            'dataset_id': engine.dataset_id,
-            'table_id': engine.table_id
         }
-        
+
     except Exception as e:
         return {
             'success': False,
             'error': str(e),
-            'message': 'BigQuery clustering connection failed'
+            'message': 'Clustering connection failed'
         }
 
 

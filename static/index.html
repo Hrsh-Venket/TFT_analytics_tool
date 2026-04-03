@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TFT Analytics</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #fff; color: #111; }
+
+        .container { max-width: 720px; margin: 0 auto; padding: 48px 24px; }
+
+        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 32px; }
+
+        /* Query input */
+        textarea {
+            width: 100%; padding: 12px; font-family: "SF Mono", "Fira Code", monospace;
+            font-size: 0.85rem; border: 1px solid #ddd; border-radius: 6px;
+            resize: vertical; min-height: 80px; outline: none;
+        }
+        textarea:focus { border-color: #888; }
+
+        button.run {
+            margin-top: 8px; padding: 8px 20px; font-size: 0.85rem; font-weight: 500;
+            background: #111; color: #fff; border: none; border-radius: 6px; cursor: pointer;
+        }
+        button.run:hover { background: #333; }
+
+        /* Examples */
+        .examples { margin-top: 24px; }
+        .examples h2 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 8px; }
+        .example {
+            display: block; width: 100%; text-align: left; padding: 8px 10px;
+            font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem;
+            background: none; border: 1px solid transparent; border-radius: 4px;
+            cursor: pointer; color: #444;
+        }
+        .example:hover { background: #f5f5f5; border-color: #eee; }
+
+        /* Results */
+        .results {
+            margin-top: 32px; padding: 16px; min-height: 60px;
+            border: 1px solid #eee; border-radius: 6px; background: #fafafa;
+            font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem;
+            white-space: pre-wrap; color: #333;
+        }
+        .results.empty { color: #aaa; font-family: inherit; }
+        .results.error { color: #c00; }
+        .results .spinner { color: #888; font-family: inherit; }
+
+        /* Status bar */
+        .status-bar {
+            margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee;
+            display: flex; gap: 16px; font-size: 0.75rem; color: #999;
+        }
+        .status-dot {
+            display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+            margin-right: 4px; vertical-align: middle;
+        }
+        .status-dot.ok { background: #34c759; }
+        .status-dot.err { background: #ff3b30; }
+        .status-dot.pending { background: #ccc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TFT Analytics</h1>
+
+        <form id="query-form">
+            <textarea id="query-input" placeholder="TFTQuery().add_unit('Jinx').get_stats()"></textarea>
+            <button type="submit" class="run">Run query</button>
+        </form>
+
+        <div class="examples">
+            <h2>Examples</h2>
+            <button class="example" data-query="TFTQuery().add_unit('Jinx').get_stats()">TFTQuery().add_unit('Jinx').get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_trait('Star_Guardian', min_tier=3).get_stats()">TFTQuery().add_trait('Star_Guardian', min_tier=3).get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_unit('Jinx').add_player_level(min_level=9).add_trait('Star_Guardian', min_tier=2).get_stats()">TFTQuery().add_unit('Jinx').add_player_level(min_level=9).add_trait('Star_Guardian', min_tier=2).get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_item_on_unit('Jinx', 'Last_Whisper').get_stats()">TFTQuery().add_item_on_unit('Jinx', 'Last_Whisper').get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()">TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()</button>
+            <button class="example" data-query="TFTQuery().set_sub_cluster(15).get_stats()">TFTQuery().set_sub_cluster(15).get_stats()</button>
+        </div>
+
+        <div id="results" class="results empty">Run a query to see results</div>
+
+        <div class="status-bar" id="status-bar">
+            <span><span class="status-dot pending" id="dot-stats"></span>stats</span>
+            <span><span class="status-dot pending" id="dot-clusters"></span>clusters</span>
+            <span><span class="status-dot pending" id="dot-query"></span>query</span>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script>
+        const form = document.getElementById('query-form');
+        const input = document.getElementById('query-input');
+        const results = document.getElementById('results');
+
+        // Run query
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = input.value.trim();
+            if (!query) return;
+
+            results.className = 'results';
+            results.innerHTML = '<span class="spinner">Running...</span>';
+
+            try {
+                const data = await window.tftAPI.executeQuery(query);
+                if (data.formatted_output) {
+                    results.textContent = data.formatted_output;
+                } else if (data.error) {
+                    results.className = 'results error';
+                    results.textContent = data.error;
+                } else {
+                    results.textContent = JSON.stringify(data.data || data, null, 2);
+                }
+            } catch (err) {
+                results.className = 'results error';
+                results.textContent = err.message;
+            }
+        });
+
+        // Example buttons
+        document.querySelectorAll('.example').forEach(btn => {
+            btn.addEventListener('click', () => {
+                input.value = btn.dataset.query;
+            });
+        });
+
+        // Health checks
+        async function checkEndpoints() {
+            const checks = [
+                { name: 'stats',    fn: () => window.tftAPI.getStats() },
+                { name: 'clusters', fn: () => window.tftAPI.getClusters() },
+                { name: 'query',    fn: () => window.tftAPI.executeQuery("TFTQuery().add_custom_filter('1=1').get_stats()") },
+            ];
+
+            for (const check of checks) {
+                const dot = document.getElementById(`dot-${check.name}`);
+                try {
+                    await check.fn();
+                    dot.className = 'status-dot ok';
+                } catch {
+                    dot.className = 'status-dot err';
+                }
+            }
+        }
+
+        checkEndpoints();
+    </script>
+</body>
+</html>

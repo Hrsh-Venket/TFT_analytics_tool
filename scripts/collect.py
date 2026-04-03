@@ -1,24 +1,24 @@
 """
 TFT Data Collection Module
 
-This module handles BigQuery integration and batch collection logic for TFT match data.
+This module handles PostgreSQL integration and batch collection logic for TFT match data.
 Uses riot_api_functions.py for all Riot Games API interactions.
 
 Usage:
-    python data_collection.py --api-key YOUR_API_KEY [OPTIONS]
+    python collect.py --api-key YOUR_API_KEY [OPTIONS]
 
 Examples:
     # Basic collection with API key
-    python data_collection.py --api-key RGAPI-xxxxx
+    python collect.py --api-key RGAPI-xxxxx
 
     # Collection with custom settings
-    python data_collection.py --api-key RGAPI-xxxxx --days 30 --tier MASTER
+    python collect.py --api-key RGAPI-xxxxx --days 30 --tier MASTER
 
     # Test mode
-    python data_collection.py --test-mode
+    python collect.py --test-mode
 
     # Initialize tracker only
-    python data_collection.py --init-tracker
+    python collect.py --init-tracker
 """
 
 import sys
@@ -31,20 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from tft_analytics.api import RateLimiter, RiotAPIClient
-
-try:
-    from google.cloud import bigquery
-    from tft_analytics.bigquery import BigQueryDataImporter
-    from google.cloud.exceptions import NotFound, Forbidden
-    import pandas as pd
-    BIGQUERY_AVAILABLE = True
-    print("BigQuery client available")
-except ImportError as e:
-    print(f"Warning: BigQuery functionality not available: {e}")
-    BIGQUERY_AVAILABLE = False
-except Exception as e:
-    print(f"Warning: BigQuery client could not be initialized: {e}")
-    BIGQUERY_AVAILABLE = False
+from tft_analytics.postgres import PostgresDataImporter
 
 
 def parse_max_matches(value):
@@ -284,12 +271,12 @@ class SetBasedCollectionProgress:
 
 
 def load_test_data():
-    """Load test match data from structure.json for testing BigQuery integration"""
+    """Load test match data from structure.json for testing database integration"""
     try:
         with open('structure.json', 'r') as f:
             test_match = json.load(f)
 
-        # Add collection info for BigQuery
+        # Add collection info
         test_match['collection_info'] = {
             'start_timestamp': int(datetime.now().timestamp()),
             'collection_timestamp': int(datetime.now().timestamp())
@@ -304,74 +291,58 @@ def load_test_data():
         print(f"Error loading test data: {e}")
         return []
 
-def test_bigquery_integration():
-    """Test BigQuery integration using structure.json data"""
+def test_database_integration():
+    """Test PostgreSQL integration using structure.json data"""
     print("=" * 60)
-    print("TESTING BIGQUERY INTEGRATION")
+    print("TESTING POSTGRESQL INTEGRATION")
     print("=" * 60)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Initialize BigQuery importer
-    bigquery_importer = None
-    if BIGQUERY_AVAILABLE:
-        try:
-            bigquery_importer = BigQueryDataImporter()
-            print("BigQuery connection established")
-            print(f"  Project: {bigquery_importer.project_id}")
-            print(f"  Dataset: {bigquery_importer.dataset_id}")
-        except Exception as e:
-            print(f"BigQuery unavailable: {e}")
-            print("  Will test JSONL fallback only")
-
-    # Create tables if BigQuery is available
-    if bigquery_importer:
-        print("\n1. Creating BigQuery tables...")
-        success, message = bigquery_importer.create_tables()
-        if success:
-            print(f"Tables ready: {message}")
-        else:
-            print(f"Table creation issue: {message}")
+    try:
+        db_importer = PostgresDataImporter()
+        print("PostgreSQL connection established")
+    except Exception as e:
+        print(f"PostgreSQL unavailable: {e}")
+        return
 
     # Load test data
-    print("\n2. Loading test data...")
+    print("\n1. Loading test data...")
     test_matches = load_test_data()
     if not test_matches:
         print("Cannot proceed without test data")
         return
 
     # Test data storage
-    print("\n3. Testing data storage...")
+    print("\n2. Testing data storage...")
     inserted, duplicates, errors = store_matches_data(
-        test_matches, None, "test_output.jsonl", bigquery_importer
+        test_matches, None, "test_output.jsonl", db_importer
     )
 
     print(f"  Inserted: {inserted}")
     print(f"  Duplicates: {duplicates}")
     print(f"  Errors: {errors}")
 
-    # Test statistics if BigQuery available
-    if bigquery_importer:
-        print("\n4. Testing statistics queries...")
-        try:
-            count = bigquery_importer.get_match_count()
-            print(f"Total matches in BigQuery: {count}")
-        except Exception as e:
-            print(f"Statistics query error: {e}")
+    # Test statistics
+    print("\n3. Testing statistics queries...")
+    try:
+        count = db_importer.get_match_count()
+        print(f"Total matches in PostgreSQL: {count}")
+    except Exception as e:
+        print(f"Statistics query error: {e}")
 
     # Test duplicate detection
-    print("\n5. Testing duplicate detection...")
-    if bigquery_importer:
-        match_id = test_matches[0]['metadata']['match_id']
-        exists = bigquery_importer.check_match_exists(match_id)
-        print(f"Match {match_id} exists: {exists}")
+    print("\n4. Testing duplicate detection...")
+    match_id = test_matches[0]['metadata']['match_id']
+    exists = db_importer.check_match_exists(match_id)
+    print(f"Match {match_id} exists: {exists}")
 
-        # Try inserting again (should be duplicate)
-        print("   Attempting duplicate insertion...")
-        inserted2, duplicates2, errors2 = store_matches_data(
-            test_matches, None, None, bigquery_importer
-        )
-        print(f"   Second attempt - Inserted: {inserted2}, Duplicates: {duplicates2}")
+    print("   Attempting duplicate insertion...")
+    inserted2, duplicates2, errors2 = store_matches_data(
+        test_matches, None, None, db_importer
+    )
+    print(f"   Second attempt - Inserted: {inserted2}, Duplicates: {duplicates2}")
 
+    db_importer.close()
     print(f"\nTest completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
@@ -410,15 +381,14 @@ def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER',
     global_tracker = GlobalMatchTracker()
     progress = SetBasedCollectionProgress(progress_file, global_tracker)
 
-    # Initialize BigQuery importer
-    bigquery_importer = None
-    if BIGQUERY_AVAILABLE:
-        try:
-            bigquery_importer = BigQueryDataImporter()
-            print("BigQuery connection established")
-        except Exception as e:
-            print(f"BigQuery unavailable: {e}")
-            bigquery_importer = None
+    # Initialize PostgreSQL importer
+    db_importer = None
+    try:
+        db_importer = PostgresDataImporter()
+        print("PostgreSQL connection established")
+    except Exception as e:
+        print(f"PostgreSQL unavailable: {e}")
+        db_importer = None
 
     # Use the provided start timestamp
     period_start_timestamp = start_timestamp
@@ -507,7 +477,7 @@ def collect_period_match_data(api_key, start_timestamp, tier='CHALLENGER',
                         # Store batch data (database and/or file)
                         if batch_details:
                             inserted, duplicates, errors = store_matches_data(
-                                batch_details, progress, output_file, bigquery_importer
+                                batch_details, progress, output_file, db_importer
                             )
                             new_count = progress.add_processed_matches(valid_matches)
                             print(f"     Saved {len(batch_details)} valid matches ({new_count} new)")
@@ -552,14 +522,14 @@ def append_to_jsonl(filename, matches):
             json.dump(match, f)
             f.write('\n')
 
-def store_matches_data(matches, progress=None, output_file=None, bigquery_importer=None):
+def store_matches_data(matches, progress=None, output_file=None, db_importer=None):
       """
-      Store matches data to BigQuery and optionally JSONL file.
+      Store matches data to PostgreSQL and optionally JSONL file.
 
       :param matches: List of match data dictionaries
       :param progress: SetBasedCollectionProgress instance for tracking
       :param output_file: Optional JSONL output file for backup
-      :param bigquery_importer: BigQueryDataImporter instance
+      :param db_importer: PostgresDataImporter instance
       :return: Tuple of (inserted, duplicates, errors)
       """
       if not matches:
@@ -569,23 +539,20 @@ def store_matches_data(matches, progress=None, output_file=None, bigquery_import
       duplicates = 0
       errors = 0
 
-      # Store to BigQuery if available
-      if bigquery_importer and BIGQUERY_AVAILABLE:
+      if db_importer:
           for match in matches:
               match_id = match['metadata']['match_id']
 
-              # Check if match already exists
-              if bigquery_importer.check_match_exists(match_id):
+              if db_importer.check_match_exists(match_id):
                   duplicates += 1
                   continue
 
-              # Insert match data
-              success, message = bigquery_importer.insert_match_data(match)
+              success, message = db_importer.insert_match_data(match)
               if success:
                   inserted += 1
               else:
                   errors += 1
-                  print(f"   BigQuery insert error for {match_id}: {message}")
+                  print(f"   DB insert error for {match_id}: {message}")
 
       # Optional JSONL backup
       if output_file:
@@ -616,15 +583,14 @@ def collect_match_data(api_key, tier='CHALLENGER', region_matches='sea', region_
     client = RiotAPIClient(api_key)
     global_tracker = GlobalMatchTracker()
 
-    # Initialize BigQuery importer
-    bigquery_importer = None
-    if BIGQUERY_AVAILABLE:
-        try:
-            bigquery_importer = BigQueryDataImporter()
-            print("BigQuery connection established")
-        except Exception as e:
-            print(f"BigQuery unavailable: {e}")
-            bigquery_importer = None
+    # Initialize PostgreSQL importer
+    db_importer = None
+    try:
+        db_importer = PostgresDataImporter()
+        print("PostgreSQL connection established")
+    except Exception as e:
+        print(f"PostgreSQL unavailable: {e}")
+        db_importer = None
 
     # Get match IDs
     print("1. Collecting match IDs from high-tier players...")
@@ -674,7 +640,7 @@ def collect_match_data(api_key, tier='CHALLENGER', region_matches='sea', region_
         # Store batch data (database and/or file)
         if batch_details:
             inserted, duplicates, errors = store_matches_data(
-                batch_details, None, output_file, bigquery_importer
+                batch_details, None, output_file, db_importer
             )
 
             # Mark matches as downloaded
@@ -790,7 +756,7 @@ if __name__ == "__main__":
         print(f"  API Key: {'*' * (len(args.api_key) - 4) + args.api_key[-4:]}")
     print(f"  Tier: {args.tier}")
     print(f"  Regions: {args.region_players} (players), {args.region_matches} (matches)")
-    print(f"  Storage: {'BigQuery + JSONL' if BIGQUERY_AVAILABLE else 'JSONL only'}")
+    print(f"  Storage: PostgreSQL + JSONL")
     print(f"  Output file: {args.output_file}")
     print(f"  API batch size: {args.batch_size}, Workers: {args.max_workers}")
     if max_matches_per_player is None:
@@ -808,10 +774,10 @@ if __name__ == "__main__":
         print(f"  Days: {args.days}")
     print()
 
-    # Special mode: Test BigQuery integration
+    # Special mode: Test database integration
     if args.test_mode:
-        print("TEST MODE: Testing BigQuery integration with structure.json...")
-        test_bigquery_integration()
+        print("TEST MODE: Testing PostgreSQL integration with structure.json...")
+        test_database_integration()
         exit(0)
 
     # Special mode: Initialize global tracker
