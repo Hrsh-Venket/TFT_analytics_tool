@@ -1,0 +1,28 @@
+name: Deploy                                                                                                                                        
+            
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+                                                                                                                                                    
+concurrency:
+  group: deploy                                                                                                                                     
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, tft-host]
+    steps:
+      - name: Pull and rebuild
+        run: |                                                                                                                                      
+          cd /home/hrsh/TFT_analytics_tool
+          git pull --ff-only origin main                                                                                                            
+          docker compose --env-file .env up -d --build app                                                                                          
+
+      - name: Health check                                                                                                                          
+        run: |
+          for i in {1..20}; do
+            curl -sf http://localhost:8000/api/stats > /dev/null && echo "healthy" && exit 0
+            sleep 3                                                                                                                                 
+          done
+          echo "failed"; exit 1      

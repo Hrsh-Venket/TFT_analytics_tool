@@ -26,6 +26,9 @@ uv.lock
 .DS_Store
 *.swp
 
+# GitHub Actions self-hosted runner (contains secrets)
+actions-runner/
+
 # Runtime / data artifacts
 tft_analytics/mappings/latest/.previous/
 data/subset.json
