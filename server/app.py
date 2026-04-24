@@ -13,10 +13,11 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+import requests
 from flask import Flask, request, jsonify, send_from_directory
 from psycopg2.extras import RealDictCursor
 
-from tft_analytics.postgres import get_connection, put_connection
+from tft_analytics.postgres import get_connection, put_connection, ensure_tables
 from tft_analytics.query import TFTQuery
 
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,11 @@ STATIC_DIR = os.environ.get(
 )
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='')
+
+try:
+    ensure_tables()
+except Exception as e:
+    logger.warning(f"Could not ensure tables on startup: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +93,19 @@ def api_stats():
         }
         return jsonify(stats)
     except Exception as e:
+        error_str = str(e)
+        if 'does not exist' in error_str or 'relation' in error_str:
+            return jsonify({
+                'matches': 0,
+                'participants': 0,
+                'avg_placement': 0,
+                'avg_level': 0,
+                'avg_players_per_match': 8,
+                'last_updated': None,
+                'status': 'no_data',
+            })
         logger.error(f"Error getting stats: {e}")
-        return jsonify({'error': str(e), 'success': False}), 500
+        return jsonify({'error': error_str, 'success': False}), 500
     finally:
         put_connection(conn)
 
@@ -326,6 +343,145 @@ def format_query_result(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# POST /api/nl-to-query  — natural language → TFTQuery via OpenRouter
+# ---------------------------------------------------------------------------
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_OPENROUTER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
+NL_SYSTEM_PROMPT = """You translate a user's natural-language question about Teamfight Tactics match data into a single TFTQuery method-chain expression.
+
+TFTQuery is a Python builder. Always start with `TFTQuery()` and always end with `.get_stats()`. Chain filter methods in between. Output one line of code, no imports, no comments, no backticks.
+
+Filter methods (all return self, so they chain):
+- add_unit(unit_id: str, must_have: bool = True)
+- add_unit_count(unit_id: str, count: int)
+- add_unit_star_level(unit_id: str, min_star: int = 1, max_star: int = 3)
+- add_item_on_unit(unit_id: str, item_id: str)
+- add_unit_item_count(unit_id: str, min_count: int = 0, max_count: int = 3)
+- add_trait(trait_name: str, min_tier: int = 1, max_tier: int = 4)
+- add_player_level(min_level: int = 1, max_level: int = 10)
+- add_last_round(min_round: int = 1, max_round: int = 50)
+- add_placement_range(min_placement: int = 1, max_placement: int = 8)
+- add_set_filter(set_number: int)
+- add_patch_filter(patch_version: str)
+- or_(other: TFTQuery)   # logical OR with a sibling TFTQuery
+- not_(other: TFTQuery)  # exclude matches of sibling TFTQuery
+- xor(other: TFTQuery)   # exclusive OR with a sibling TFTQuery
+
+Unit, trait, and item identifiers use PascalCase/snake_case exactly as shown in the examples (e.g. 'Jinx', 'Kaisa', 'Aatrox', 'Anima', 'Sniper', 'Bastion', 'Last_Whisper'). Do not prefix them with the set number.
+
+Reference examples — the exact syntax and style you must follow:
+- TFTQuery().add_unit('Jinx').get_stats()
+- TFTQuery().add_trait('Anima', min_tier=2).get_stats()
+- TFTQuery().add_item_on_unit('Jinx', 'Last_Whisper').get_stats()
+- TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()
+- TFTQuery().add_unit('Jinx').add_trait('Sniper', min_tier=2).add_player_level(min_level=9).get_stats()
+- TFTQuery().add_trait('Bastion', min_tier=2).not_(TFTQuery().add_unit('Aatrox')).get_stats()
+- TFTQuery().add_unit('Kaisa').or_(TFTQuery().add_unit('Jinx')).get_stats()
+
+Respond with ONLY a JSON object, no prose, no markdown fences. Both fields are REQUIRED and neither may be empty:
+{"query": "<TFTQuery()...get_stats()>", "description": "<one sentence rephrasing the user's request>"}
+
+The `description` must be a non-empty plain-English sentence, present tense, that mirrors every filter in the query so the user can verify their intent was understood.
+
+Worked example — user asks: "how does Jinx do at 3 stars"
+{"query": "TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()", "description": "Stats for games containing a 3-star Jinx."}
+
+Worked example — user asks: "Kaisa or Jinx winrate"
+{"query": "TFTQuery().add_unit('Kaisa').or_(TFTQuery().add_unit('Jinx')).get_stats()", "description": "Stats for games containing either Kaisa or Jinx."}
+"""
+
+
+def _extract_json_object(text: str) -> Dict[str, Any]:
+    """Best-effort JSON extraction from a model response."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start:end + 1])
+    raise ValueError(f"Could not parse JSON from model response: {text[:200]}")
+
+
+@app.route('/api/nl-to-query', methods=['POST'])
+def api_nl_to_query():
+    api_key = os.environ.get('OPENROUTER_API_KEY')
+    if not api_key:
+        return jsonify({
+            'error': 'OPENROUTER_API_KEY is not set on the server',
+            'success': False,
+        }), 500
+
+    try:
+        request_data = request.get_json(force=True) if request.is_json else {}
+        nl_query = (request_data or {}).get('query', '').strip()
+        if not nl_query:
+            return jsonify({'error': "Missing 'query' parameter", 'success': False}), 400
+
+        model = os.environ.get('OPENROUTER_MODEL') or DEFAULT_OPENROUTER_MODEL
+        payload = {
+            'model': model,
+            'messages': [
+                {'role': 'system', 'content': NL_SYSTEM_PROMPT},
+                {'role': 'user', 'content': nl_query},
+            ],
+            'response_format': {'type': 'json_object'},
+            'temperature': 0,
+        }
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        }
+
+        logger.info(f"NL→Query via {model}: {nl_query[:120]}")
+        resp = requests.post(OPENROUTER_URL, json=payload, headers=headers, timeout=60)
+        if not resp.ok:
+            logger.error(f"OpenRouter error {resp.status_code}: {resp.text[:500]}")
+            return jsonify({
+                'error': f"OpenRouter returned HTTP {resp.status_code}",
+                'detail': resp.text[:500],
+                'success': False,
+            }), 502
+
+        content = resp.json()['choices'][0]['message']['content']
+        logger.info(f"NL→Query raw model output: {content[:500]}")
+        parsed = _extract_json_object(content)
+        query_text = (parsed.get('query') or '').strip()
+        description = (parsed.get('description') or '').strip()
+        # Free models occasionally corrupt the `description` key. If it's
+        # missing but a second string field exists, use that as the description.
+        if not description:
+            for key, val in parsed.items():
+                if key == 'query' or not isinstance(val, str):
+                    continue
+                val = val.strip()
+                if val and 'TFTQuery()' not in val:
+                    description = val
+                    break
+
+        if not query_text or 'TFTQuery()' not in query_text:
+            return jsonify({
+                'error': 'Model did not return a valid TFTQuery expression',
+                'raw': content,
+                'success': False,
+            }), 502
+
+        return jsonify({
+            'success': True,
+            'query': query_text,
+            'description': description or '(model returned no description)',
+            'model': model,
+        })
+    except Exception as e:
+        logger.error(f"NL→Query failed: {e}")
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
 @app.route('/api/query', methods=['POST'])
 def api_query():
     try:
@@ -354,5 +510,5 @@ def api_query():
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port, debug=True)

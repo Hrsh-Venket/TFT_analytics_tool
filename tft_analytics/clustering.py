@@ -138,10 +138,11 @@ class TFTClusteringEngine:
             Set of carry unit IDs
         """
         carry_units = frozenset(
-            unit['character_id'] for unit in participant.get('units', [])
+            unit.get('name') or unit.get('character_id', '')
+            for unit in participant.get('units', [])
             if len(unit.get('item_names', [])) >= 2
         )
-        
+
         return carry_units
     
     def load_compositions(self,
@@ -537,20 +538,18 @@ class TFTClusteringEngine:
             units_in_comp = set()
             
             for unit in comp.participant_data.get('units', []):
-                char_id = unit.get('character_id', '')
-                if not char_id:
+                unit_key = unit.get('name') or unit.get('character_id', '')
+                if not unit_key:
                     continue
-                    
-                units_in_comp.add(char_id)
-                
-                # Count star level
+
+                units_in_comp.add(unit_key)
+
                 tier = unit.get('tier', 1)
-                unit_stats[char_id]['star_counts'][tier] += 1
-                
-                # Count if it's a carry (2+ items)
+                unit_stats[unit_key]['star_counts'][tier] += 1
+
                 item_count = len(unit.get('item_names', []))
                 if item_count >= 2:
-                    unit_stats[char_id]['carry_count'] += 1
+                    unit_stats[unit_key]['carry_count'] += 1
             
             # Count frequency (presence in match, not duplicates)
             for unit_name in units_in_comp:
@@ -895,90 +894,53 @@ def test_connection() -> Dict[str, Any]:
 
 def main():
     """Main function for testing the clustering system."""
-    print("TFT Analytics BigQuery Clustering System")
+    print("TFT Analytics Clustering System")
     print("=" * 50)
-    
-    # Test connection
-    print("Testing BigQuery clustering connection...")
+
+    print("Testing PostgreSQL clustering connection...")
     connection_result = test_connection()
-    
+
     if connection_result['success']:
-        print("[SUCCESS] BigQuery clustering connection successful")
+        print("[SUCCESS] PostgreSQL clustering connection successful")
         print(f"   Message: {connection_result['message']}")
-        print(f"   Project: {connection_result['project_id']}")
-        print(f"   Dataset: {connection_result['dataset_id']}")
+        if 'compositions_loaded' in connection_result:
+            print(f"   Compositions loaded: {connection_result['compositions_loaded']}")
     else:
-        print("[ERROR] BigQuery clustering connection failed")
+        print("[ERROR] PostgreSQL clustering connection failed")
         print(f"   Error: {connection_result['error']}")
         if not TEST_MODE:
-            print("   Enable test mode with: set TFT_TEST_MODE=true")
+            print("   Enable test mode with: TFT_TEST_MODE=true")
             return
-    
+
     print("\nTesting clustering functionality...")
-    
-    # Test clustering with small sample
+
     try:
         print("\n1. Running clustering analysis...")
         results = run_clustering_analysis(limit=None if not TEST_MODE else 200)
-        
+
         stats = results['statistics']
         print("[SUCCESS] Clustering analysis completed:")
         print(f"   Total compositions: {stats['total_compositions']}")
         print(f"   Sub-clusters created: {stats['sub_clusters']['count']}")
         print(f"   Main clusters created: {stats['main_clusters']['count']}")
-        print(f"   Coverage: {stats['sub_clusters']['coverage']}% sub-clustered, {stats['main_clusters']['coverage']}% main-clustered")
-        
-        # Show top main clusters
+        print(f"   Coverage: {stats['sub_clusters']['coverage']}% sub-clustered, "
+              f"{stats['main_clusters']['coverage']}% main-clustered")
+
         if results['main_clusters']:
-            print(f"\n2. Top 3 Main Clusters (by performance):")
+            print("\n2. Top 3 Main Clusters (by performance):")
             for i, cluster in enumerate(results['main_clusters'][:3], 1):
-                print(f"   {i}. Cluster {cluster['id']}: {cluster['size']} comps, {cluster['avg_placement']:.2f} avg place")
+                print(f"   {i}. Cluster {cluster['id']}: {cluster['size']} comps, "
+                      f"{cluster['avg_placement']:.2f} avg place")
                 print(f"      Common carries: {cluster['common_carries']}")
                 print(f"      Top units: {cluster['top_units'][:60]}...")
-        
-        # Test detailed cluster information
-        if results['main_clusters']:
-            print(f"\n3. Detailed cluster information test...")
-            cluster_id = results['main_clusters'][0]['id']
-            engine = results['engine']
-            
-            details = engine.get_cluster_details(cluster_id, 'main')
-            if details:
-                print(f"[SUCCESS] Retrieved details for main cluster {cluster_id}:")
-                print(f"   Sub-clusters: {len(details['sub_clusters'])}")
-                print(f"   Sample compositions: {len(details['sample_compositions'])}")
-            
+
     except Exception as e:
         print(f"[ERROR] Clustering analysis failed: {e}")
         import traceback
         traceback.print_exc()
-    
+
     print("\n" + "=" * 50)
     print("[SUCCESS] Clustering system testing completed!")
-    
-    print("\nFirebase Integration Examples:")
-    print("=" * 50)
-    print("```python")
-    print("# Firebase Cloud Function example")
-    print("from clustering import run_clustering_analysis, TFTClusteringEngine")
-    print("")
-    print("def get_cluster_analysis(request):")
-    print("    filters = request.json.get('filters', {})")
-    print("    results = run_clustering_analysis(filters=filters, limit=1000)")
-    print("    return {'clusters': results['main_clusters'], 'stats': results['statistics']}")
-    print("")
-    print("def get_cluster_details(request):")
-    print("    cluster_id = request.json.get('cluster_id')")
-    print("    cluster_type = request.json.get('type', 'main')")
-    print("    ")
-    print("    engine = TFTClusteringEngine()")
-    print("    engine.load_compositions_from_bigquery()")
-    print("    engine.create_sub_clusters()")
-    print("    engine.create_main_clusters()")
-    print("    ")
-    print("    details = engine.get_cluster_details(cluster_id, cluster_type)")
-    print("    return {'cluster': details}")
-    print("```")
 
 
 if __name__ == "__main__":

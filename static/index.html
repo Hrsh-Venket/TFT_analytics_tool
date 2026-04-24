@@ -25,28 +25,101 @@
             background: #111; color: #fff; border: none; border-radius: 6px; cursor: pointer;
         }
         button.run:hover { background: #333; }
+        button.run:disabled { background: #888; cursor: not-allowed; }
 
         /* Examples */
         .examples { margin-top: 24px; }
-        .examples h2 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-bottom: 8px; }
+        .examples summary {
+            font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.05em; color: #888; margin-bottom: 8px;
+            cursor: pointer; list-style: none; user-select: none;
+        }
+        .examples summary::-webkit-details-marker { display: none; }
+        .examples summary::before {
+            content: "▸"; display: inline-block; margin-right: 6px;
+            transition: transform 0.15s ease; font-size: 0.7rem;
+        }
+        .examples[open] summary::before { transform: rotate(90deg); }
         .example {
-            display: block; width: 100%; text-align: left; padding: 8px 10px;
+            display: block; width: 100%; text-align: left; padding: 8px 10px 8px 32px;
             font-family: "SF Mono", "Fira Code", monospace; font-size: 0.8rem;
             background: none; border: 1px solid transparent; border-radius: 4px;
             cursor: pointer; color: #444;
+            white-space: pre; line-height: 1.5;
         }
         .example:hover { background: #f5f5f5; border-color: #eee; }
+        @media (max-width: 520px) {
+            .example { font-size: 0.75rem; padding-left: 20px; }
+        }
 
         /* Results */
         .results {
+            position: relative;
             margin-top: 32px; padding: 16px; min-height: 60px;
             border: 1px solid #eee; border-radius: 6px; background: #fafafa;
             font-family: "SF Mono", "Fira Code", monospace; font-size: 0.85rem;
-            white-space: pre-wrap; color: #333;
+            color: #333;
+            transition: background 0.15s ease, border-color 0.15s ease;
         }
+        #results-content { display: block; white-space: pre-wrap; }
         .results.empty { color: #aaa; font-family: inherit; }
         .results.error { color: #c00; }
         .results .spinner { color: #888; font-family: inherit; }
+        .results.copyable { cursor: pointer; }
+        .results.copyable:hover { background: #f0f0f0; }
+        .results.copied { background: #f0fdf4; border-color: #bbf7d0; }
+
+        /* Celebration: rainbow border + fireworks for ~2s */
+        @property --rainbow-angle {
+            syntax: '<angle>';
+            initial-value: 0deg;
+            inherits: false;
+        }
+        .results.celebrate,
+        .results.celebrate.copyable:hover {
+            border: 2px solid transparent;
+            background:
+                linear-gradient(#fafafa, #fafafa) padding-box,
+                conic-gradient(from var(--rainbow-angle),
+                    #ff3b30, #ff9500, #ffcc00, #34c759, #007aff, #5856d6, #ff2d55, #ff3b30) border-box;
+            animation: rainbow-spin 2s linear, celebrate-glow 2s ease-out;
+        }
+        @keyframes rainbow-spin {
+            from { --rainbow-angle: 0deg; }
+            to   { --rainbow-angle: 720deg; }
+        }
+        @keyframes celebrate-glow {
+            0%   { box-shadow: 0 0 0 0 rgba(255, 149, 0, 0.0); }
+            15%  { box-shadow: 0 0 24px 4px rgba(255, 149, 0, 0.45); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 149, 0, 0.0); }
+        }
+        .particle {
+            position: absolute; width: 6px; height: 6px; border-radius: 50%;
+            pointer-events: none; z-index: 2;
+            animation: particle-burst 1.1s ease-out forwards;
+        }
+        @keyframes particle-burst {
+            0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+            100% { transform: translate(var(--dx), var(--dy)) scale(0.2); opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .results.celebrate { animation: none; border-color: #34c759; }
+            .particle { display: none; }
+        }
+
+        .copy-indicator {
+            position: absolute; top: 8px; right: 10px;
+            display: inline-flex; align-items: center; gap: 4px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 0.7rem;
+            color: #888; opacity: 0; transition: opacity 0.15s ease;
+            pointer-events: none; user-select: none;
+        }
+        .results.copyable:hover .copy-indicator { opacity: 1; }
+        .results.copied .copy-indicator { opacity: 1; color: #16a34a; }
+        .copy-indicator svg { display: block; }
+        .copy-indicator .check-group { display: none; align-items: center; gap: 4px; }
+        .results.copied .copy-indicator .copy-group { display: none; }
+        .results.copied .copy-indicator .check-group { display: inline-flex; }
 
         /* Status bar */
         .status-bar {
@@ -67,21 +140,52 @@
         <h1>TFT Analytics</h1>
 
         <form id="query-form">
-            <textarea id="query-input" placeholder="TFTQuery().add_unit('Jinx').get_stats()"></textarea>
-            <button type="submit" class="run">Run query</button>
+            <textarea id="query-input" placeholder="Ask a question"></textarea>
+            <button type="submit" class="run" id="run-btn">Run query</button>
         </form>
 
-        <div class="examples">
-            <h2>Examples</h2>
-            <button class="example" data-query="TFTQuery().add_unit('Jinx').get_stats()">TFTQuery().add_unit('Jinx').get_stats()</button>
-            <button class="example" data-query="TFTQuery().add_trait('Star_Guardian', min_tier=3).get_stats()">TFTQuery().add_trait('Star_Guardian', min_tier=3).get_stats()</button>
-            <button class="example" data-query="TFTQuery().add_unit('Jinx').add_player_level(min_level=9).add_trait('Star_Guardian', min_tier=2).get_stats()">TFTQuery().add_unit('Jinx').add_player_level(min_level=9).add_trait('Star_Guardian', min_tier=2).get_stats()</button>
-            <button class="example" data-query="TFTQuery().add_item_on_unit('Jinx', 'Last_Whisper').get_stats()">TFTQuery().add_item_on_unit('Jinx', 'Last_Whisper').get_stats()</button>
-            <button class="example" data-query="TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()">TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()</button>
-            <button class="example" data-query="TFTQuery().set_sub_cluster(15).get_stats()">TFTQuery().set_sub_cluster(15).get_stats()</button>
-        </div>
+        <details class="examples">
+            <summary>Syntax for nerds</summary>
+            <button class="example" data-query="TFTQuery().add_unit('Jinx').get_stats()">TFTQuery()
+    .add_unit('Jinx')
+    .get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_trait('Anima', min_tier=2).get_stats()">TFTQuery()
+    .add_trait('Anima', min_tier=2)
+    .get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_item_on_unit('Jinx', 'Last_Whisper').get_stats()">TFTQuery()
+    .add_item_on_unit('Jinx', 'Last_Whisper')
+    .get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_unit_star_level('Jinx', min_star=3).get_stats()">TFTQuery()
+    .add_unit_star_level('Jinx', min_star=3)
+    .get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_unit('Jinx').add_trait('Sniper', min_tier=2).add_player_level(min_level=9).get_stats()">TFTQuery()
+    .add_unit('Jinx')
+    .add_trait('Sniper', min_tier=2)
+    .add_player_level(min_level=9)
+    .get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_trait('Bastion', min_tier=2).not_(TFTQuery().add_unit('Aatrox')).get_stats()">TFTQuery()
+    .add_trait('Bastion', min_tier=2)
+    .not_(TFTQuery().add_unit('Aatrox'))
+    .get_stats()</button>
+            <button class="example" data-query="TFTQuery().add_unit('Kaisa').or_(TFTQuery().add_unit('Jinx')).get_stats()">TFTQuery()
+    .add_unit('Kaisa')
+    .or_(TFTQuery().add_unit('Jinx'))
+    .get_stats()</button>
+        </details>
 
-        <div id="results" class="results empty">Run a query to see results</div>
+        <div id="results" class="results empty">
+            <span id="results-content">Run a query to see results</span>
+            <span class="copy-indicator" aria-hidden="true">
+                <span class="copy-group" style="display: inline-flex; align-items: center; gap: 4px;">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <span>Copy</span>
+                </span>
+                <span class="check-group">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span>Copied</span>
+                </span>
+            </span>
+        </div>
 
         <div class="status-bar" id="status-bar">
             <span><span class="status-dot pending" id="dot-stats"></span>stats</span>
@@ -94,7 +198,61 @@
     <script>
         const form = document.getElementById('query-form');
         const input = document.getElementById('query-input');
+        const runBtn = document.getElementById('run-btn');
         const results = document.getElementById('results');
+        const resultsContent = document.getElementById('results-content');
+
+        // Claude-Code-style thinking gerunds
+        const THINKING_WORDS = [
+            'Pondering', 'Cogitating', 'Ruminating', 'Musing', 'Noodling',
+            'Marinating', 'Mulling', 'Deliberating', 'Percolating', 'Simmering',
+            'Stewing', 'Conjuring', 'Synthesizing', 'Brewing', 'Hatching',
+            'Ideating', 'Finagling', 'Crunching', 'Churning', 'Wrangling'
+        ];
+        const pickThinkingWord = () =>
+            THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)];
+
+        const PARTICLE_COLORS = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#007aff', '#5856d6', '#ff2d55'];
+        let celebrateTimer = null;
+        function fireworks() {
+            const count = 22;
+            for (let i = 0; i < count; i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 50 + Math.random() * 70;
+                p.style.setProperty('--dx', `${Math.cos(angle) * dist}px`);
+                p.style.setProperty('--dy', `${Math.sin(angle) * dist}px`);
+                p.style.background = PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)];
+                p.style.left = `${15 + Math.random() * 70}%`;
+                p.style.top = `${15 + Math.random() * 70}%`;
+                p.style.animationDelay = `${Math.random() * 0.4}s`;
+                results.appendChild(p);
+                setTimeout(() => p.remove(), 1600);
+            }
+        }
+        function celebrate() {
+            results.classList.remove('celebrate');
+            // force reflow so animation restarts cleanly on repeated runs
+            void results.offsetWidth;
+            results.classList.add('celebrate');
+            fireworks();
+            clearTimeout(celebrateTimer);
+            celebrateTimer = setTimeout(() => results.classList.remove('celebrate'), 2000);
+        }
+
+        function setResult(text, { error = false } = {}) {
+            results.classList.remove('empty', 'copied');
+            results.classList.toggle('error', error);
+            resultsContent.textContent = text;
+            results.classList.add('copyable');
+            if (!error) celebrate();
+        }
+
+        // Heuristic: anything that begins with TFTQuery( is treated as code.
+        function looksLikeTFTQuery(text) {
+            return /^\s*TFTQuery\s*\(/.test(text);
+        }
 
         // Run query
         form.addEventListener('submit', async (e) => {
@@ -102,22 +260,54 @@
             const query = input.value.trim();
             if (!query) return;
 
-            results.className = 'results';
-            results.innerHTML = '<span class="spinner">Running...</span>';
+            results.classList.remove('empty', 'error', 'copyable', 'copied');
+
+            if (!looksLikeTFTQuery(query)) {
+                // Natural-language path: translate, then let the user run it.
+                resultsContent.innerHTML = `<span class="spinner">${pickThinkingWord()}...</span>`;
+                runBtn.disabled = true;
+                try {
+                    const nl = await window.tftAPI.translateQuery(query);
+                    input.value = nl.query;
+                    const description = nl.description || '(no description returned)';
+                    setResult(`I understood that to mean:\n${description}`);
+                } catch (err) {
+                    setResult(err.message, { error: true });
+                } finally {
+                    runBtn.disabled = false;
+                }
+                return;
+            }
+
+            resultsContent.innerHTML = '<span class="spinner">Running...</span>';
 
             try {
                 const data = await window.tftAPI.executeQuery(query);
                 if (data.formatted_output) {
-                    results.textContent = data.formatted_output;
+                    setResult(data.formatted_output);
                 } else if (data.error) {
-                    results.className = 'results error';
-                    results.textContent = data.error;
+                    setResult(data.error, { error: true });
                 } else {
-                    results.textContent = JSON.stringify(data.data || data, null, 2);
+                    setResult(JSON.stringify(data.data || data, null, 2));
                 }
             } catch (err) {
-                results.className = 'results error';
-                results.textContent = err.message;
+                setResult(err.message, { error: true });
+            }
+        });
+
+        // Click to copy
+        let copyResetTimer = null;
+        results.addEventListener('click', async () => {
+            if (!results.classList.contains('copyable')) return;
+            const text = resultsContent.textContent;
+            if (!text) return;
+            try {
+                await navigator.clipboard.writeText(text);
+                results.classList.add('copied');
+                clearTimeout(copyResetTimer);
+                copyResetTimer = setTimeout(() => results.classList.remove('copied'), 1200);
+            } catch {
+                // clipboard API unavailable; ignore silently
             }
         });
 

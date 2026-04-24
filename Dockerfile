@@ -15,7 +15,8 @@ COPY static/ static/
 COPY data/ data/
 
 ENV STATIC_DIR=/app/static
+ENV PYTHONPATH=/app
 
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8080", "server.app:app"]
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "--timeout", "120", "server.app:app"]

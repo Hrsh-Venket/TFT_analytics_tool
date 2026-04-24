@@ -53,6 +53,12 @@ def put_connection(conn):
     get_pool().putconn(conn)
 
 
+def ensure_tables():
+    """Create all tables/indexes if they don't exist. Safe to call on app startup."""
+    importer = PostgresDataImporter()
+    importer.close()
+
+
 class PostgresDataImporter:
     """
     PostgreSQL data importer for TFT match data.

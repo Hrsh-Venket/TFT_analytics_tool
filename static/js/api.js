@@ -8,7 +8,8 @@ class TFTAnalyticsAPI {
             stats: '/api/stats',
             clusters: '/api/clusters',
             query: '/api/query',
-            clusterDetails: '/api/cluster-details'
+            clusterDetails: '/api/cluster-details',
+            nlToQuery: '/api/nl-to-query'
         };
     }
 
@@ -79,6 +80,21 @@ class TFTAnalyticsAPI {
             console.error('Failed to execute query:', error);
             throw error;
         }
+    }
+
+    // Translate natural-language query → TFTQuery via LLM (OpenRouter)
+    async translateQuery(nlQuery) {
+        const response = await fetch(this.endpoints.nlToQuery, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: nlQuery })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const base = data.error || `HTTP ${response.status}${response.statusText ? `: ${response.statusText}` : ''}`;
+            throw new Error(data.detail ? `${base}\n${data.detail}` : base);
+        }
+        return data;
     }
 
     // Test function connectivity
