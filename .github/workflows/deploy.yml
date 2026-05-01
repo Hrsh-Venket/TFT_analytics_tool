@@ -15,8 +15,10 @@ jobs:
     steps:
       - name: Pull and rebuild
         run: |                                                                                                                                      
-          cd /home/hrsh/TFT_analytics_tool
-          git pull --ff-only origin main                                                                                                            
+          cd /home/hrsh/deploy/TFT_analytics_tool
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
           docker compose --env-file .env up -d --build app                                                                                          
 
       - name: Health check                                                                                                                          
