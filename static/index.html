@@ -12,35 +12,6 @@
 
         h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 32px; }
 
-        /* Site header (matches hrsh-venket.github.io) */
-        header.site {
-            border-bottom: 1px solid #e5e5e5;
-            margin-bottom: 2.5rem;
-            padding-bottom: 1rem;
-            display: flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-        header.site .brand {
-            font-weight: 600;
-            font-size: 1.05rem;
-            text-decoration: none;
-            color: #1a1a1a;
-        }
-        header.site nav a {
-            margin-left: 1.25rem;
-            text-decoration: none;
-            color: #666;
-            font-size: 0.95rem;
-        }
-        header.site nav a:hover,
-        header.site nav a.active { color: #1a1a1a; }
-        @media (max-width: 540px) {
-            header.site nav a { margin-left: 0; margin-right: 1rem; }
-        }
-
         /* Query input */
         textarea {
             width: 100%; padding: 12px; font-family: "SF Mono", "Fira Code", monospace;
@@ -166,16 +137,6 @@
 </head>
 <body>
     <div class="container">
-        <header class="site">
-            <a class="brand" href="https://hrsh-venket.github.io/">Hrsh Venket</a>
-            <nav>
-                <a href="https://hrsh-venket.github.io/">profile</a>
-                <a href="https://hrsh-venket.github.io/projects/">projects</a>
-                <a href="https://hrsh-venket.github.io/blog/">blog</a>
-                <a href="/" class="active">tft-app</a>
-            </nav>
-        </header>
-
         <h1>TFT Analytics</h1>
 
         <form id="query-form">
