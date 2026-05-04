@@ -17,7 +17,8 @@
 
         .container { max-width: 720px; margin: 0 auto; padding: 48px 24px; }
 
-        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 32px; }
+        h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 12px; }
+        .intro { color: #555; font-size: 0.95rem; margin-bottom: 32px; }
 
         /* Site header (matches hrsh-venket.github.io) */
         header.site {
@@ -71,6 +72,12 @@
         }
         button.run:hover { background: #333; }
         button.run:disabled { background: #888; cursor: not-allowed; }
+
+        button.clear {
+            margin-top: 8px; margin-left: 8px; padding: 7px 19px; font-size: 0.85rem; font-weight: 500;
+            background: #fff; color: #111; border: 1px solid #111; border-radius: 6px; cursor: pointer;
+        }
+        button.clear:hover { background: #f5f5f5; }
 
         /* Examples */
         .examples { margin-top: 24px; }
@@ -167,6 +174,12 @@
         .results.copied .copy-indicator .check-group { display: inline-flex; }
 
         /* Status bar */
+        .results-hint {
+            margin-top: 12px;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
         .status-bar {
             margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee;
             display: flex; gap: 16px; font-size: 0.75rem; color: #999;
@@ -193,10 +206,12 @@
         </header>
 
         <h1>TFT App</h1>
+        <p class="intro">Have you ever wondered how strong your strategy might be? Not had the tools to answer your question? Just describe your comp and hit run query and we will help you!</p>
 
         <form id="query-form">
             <textarea id="query-input" placeholder="Ask a question"></textarea>
             <button type="submit" class="run" id="run-btn">Run query</button>
+            <button type="button" class="clear" id="clear-btn">Clear</button>
         </form>
 
         <details class="examples">
@@ -241,6 +256,7 @@
                 </span>
             </span>
         </div>
+        <div id="results-hint" class="results-hint" hidden>Not what you meant? Rephrase your description and try again</div>
 
         <div class="status-bar" id="status-bar">
             <span><span class="status-dot pending" id="dot-stats"></span>stats</span>
@@ -261,6 +277,7 @@
         const runBtn = document.getElementById('run-btn');
         const results = document.getElementById('results');
         const resultsContent = document.getElementById('results-content');
+        const resultsHint = document.getElementById('results-hint');
 
         // Claude-Code-style thinking gerunds
         const THINKING_WORDS = [
@@ -321,6 +338,7 @@
             if (!query) return;
 
             results.classList.remove('empty', 'error', 'copyable', 'copied');
+            resultsHint.hidden = true;
 
             if (!looksLikeTFTQuery(query)) {
                 // Natural-language path: translate, then let the user run it.
@@ -331,6 +349,7 @@
                     input.value = nl.query;
                     const description = nl.description || '(no description returned)';
                     setResult(`I understood that to mean:\n${description}`);
+                    resultsHint.hidden = false;
                 } catch (err) {
                     setResult(err.message, { error: true });
                 } finally {
@@ -369,6 +388,12 @@
             } catch {
                 // clipboard API unavailable; ignore silently
             }
+        });
+
+        // Clear button
+        document.getElementById('clear-btn').addEventListener('click', () => {
+            input.value = '';
+            input.focus();
         });
 
         // Example buttons
