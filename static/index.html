@@ -63,8 +63,21 @@
             width: 100%; padding: 12px; font-family: "SF Mono", "Fira Code", monospace;
             font-size: 0.85rem; border: 1px solid #ddd; border-radius: 6px;
             resize: vertical; min-height: 80px; outline: none;
+            transition: border-color 0.15s ease;
         }
         textarea:focus { border-color: #888; }
+        textarea.celebrate,
+        textarea.celebrate:focus {
+            border: 2px solid transparent;
+            background:
+                linear-gradient(#fff, #fff) padding-box,
+                conic-gradient(from var(--rainbow-angle),
+                    #ff3b30, #ff9500, #ffcc00, #34c759, #007aff, #5856d6, #ff2d55, #ff3b30) border-box;
+            animation: rainbow-spin 2s linear, celebrate-glow 2s ease-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            textarea.celebrate { animation: none; border-color: #34c759; }
+        }
 
         button.run {
             margin-top: 8px; padding: 8px 20px; font-size: 0.85rem; font-weight: 500;
@@ -206,11 +219,11 @@
         </header>
 
         <h1>TFT App</h1>
-        <p class="intro">Have you ever wondered how strong your strategy might be? Not had the tools to answer your question? Just describe your comp and hit run query and we will help you!</p>
+        <p class="intro">Have you ever wondered how strong your strategy might be? Not had the tools to answer your question? Just describe your comp and hit 'Run'. We will help you phrase your question as a query!</p>
 
         <form id="query-form">
-            <textarea id="query-input" placeholder="Ask a question"></textarea>
-            <button type="submit" class="run" id="run-btn">Run query</button>
+            <textarea id="query-input" placeholder="How strong is Jinx three star with ie and last whisper?"></textarea>
+            <button type="submit" class="run" id="run-btn">Run</button>
             <button type="button" class="clear" id="clear-btn">Clear</button>
         </form>
 
@@ -318,12 +331,21 @@
             celebrateTimer = setTimeout(() => results.classList.remove('celebrate'), 2000);
         }
 
-        function setResult(text, { error = false } = {}) {
+        let celebrateInputTimer = null;
+        function celebrateInput() {
+            input.classList.remove('celebrate');
+            void input.offsetWidth;
+            input.classList.add('celebrate');
+            clearTimeout(celebrateInputTimer);
+            celebrateInputTimer = setTimeout(() => input.classList.remove('celebrate'), 2000);
+        }
+
+        function setResult(text, { error = false, celebrate: doCelebrate = true } = {}) {
             results.classList.remove('empty', 'copied');
             results.classList.toggle('error', error);
             resultsContent.textContent = text;
             results.classList.add('copyable');
-            if (!error) celebrate();
+            if (!error && doCelebrate) celebrate();
         }
 
         // Heuristic: anything that begins with TFTQuery( is treated as code.
@@ -348,7 +370,8 @@
                     const nl = await window.tftAPI.translateQuery(query);
                     input.value = nl.query;
                     const description = nl.description || '(no description returned)';
-                    setResult(`I understood that to mean:\n${description}`);
+                    setResult(`I understood that to mean:\n${description}`, { celebrate: false });
+                    celebrateInput();
                     resultsHint.hidden = false;
                 } catch (err) {
                     setResult(err.message, { error: true });
@@ -402,6 +425,23 @@
                 input.value = btn.dataset.query;
             });
         });
+
+        // Cycle placeholder questions every 4s until the user starts typing
+        const PLACEHOLDER_QUESTIONS = [
+            'How strong is Jinx three star with ie and last whisper?',
+            'Is karma without mordekaiser good?',
+            '3 star briar on a lvl 8 board???',
+            '金克丝可以用无尽吗？(you can ask questions in any language!)'
+        ];
+        let placeholderIdx = 0;
+        const placeholderTimer = setInterval(() => {
+            if (input.value) { clearInterval(placeholderTimer); return; }
+            placeholderIdx = (placeholderIdx + 1) % PLACEHOLDER_QUESTIONS.length;
+            input.placeholder = PLACEHOLDER_QUESTIONS[placeholderIdx];
+        }, 4000);
+        input.addEventListener('input', () => {
+            if (input.value) clearInterval(placeholderTimer);
+        }, { once: true });
 
         // Health checks
         async function checkEndpoints() {
